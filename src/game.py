@@ -116,6 +116,7 @@ class Game:
                         if item:
                             self.items.append(item)
         
+        self.game_map.update_fov(self.player.x, self.player.y, 15)
         self.update_camera()
     
     def get_room_color(self, room_type):
@@ -179,6 +180,7 @@ class Game:
         if 0 <= new_x < MAP_WIDTH and 0 <= new_y < MAP_HEIGHT:
             if self.game_map.tiles[new_x][new_y] == 0:
                 self.player.move(dx, dy)
+                self.game_map.update_fov(self.player.x, self.player.y, 15)
                 self.update_camera()
         
         room = self.game_map.get_room_at(self.player.x, self.player.y)
