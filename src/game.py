@@ -59,6 +59,7 @@ class Game:
         
         self.message_log = []
         self.room_colors = {}
+        self.last_room_type = None
     
     def add_message(self, text):
         self.message_log.append(text)
@@ -184,15 +185,20 @@ class Game:
                 self.update_camera()
         
         room = self.game_map.get_room_at(self.player.x, self.player.y)
-        if room and room.room_type == 'shop':
+        current_room_type = room.room_type if room else None
+        
+        if current_room_type == 'shop' and self.last_room_type != 'shop':
             self.state = GameState.SHOP
             self.shop.refresh_items()
-        elif room and room.room_type == 'rest':
+            self.add_message('欢迎来到商店！')
+        elif current_room_type == 'rest' and self.last_room_type != 'rest':
             heal_amount = int(self.player.max_hp * 0.3)
             mp_amount = int(self.player.max_mp * 0.3)
             self.player.heal(heal_amount)
             self.player.restore_mp(mp_amount)
             self.add_message(f'在休息点恢复了 {heal_amount} 生命和 {mp_amount} 魔力！')
+        
+        self.last_room_type = current_room_type
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
@@ -693,17 +699,34 @@ class Game:
             self.screen.blit(item_text, (items_rect.x + 20, y + 3))
             y += 30
         
-        help_bg = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 860, 45)
-        pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
+        buy_btn_rect = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 200, 45)
+        sell_btn_rect = pygame.Rect(panel_rect.x + 240, panel_rect.y + panel_rect.height - 60, 200, 45)
+        exit_btn_rect = pygame.Rect(panel_rect.x + panel_rect.width - 220, panel_rect.y + panel_rect.height - 60, 200, 45)
         
-        help_lines = [
-            '↑↓: 选择 | TAB: 切换买/卖 | 回车: 确认交易 | ESC: 离开商店'
-        ]
-        y = help_bg.y + 8
-        for line in help_lines:
-            help_text = FONT_NORMAL.render(line, True, GRAY)
-            self.screen.blit(help_text, (help_bg.x + 20, y))
-            y += 18
+        if self.shop_mode == 'buy':
+            pygame.draw.rect(self.screen, (40, 100, 60), buy_btn_rect)
+            pygame.draw.rect(self.screen, (60, 60, 80), sell_btn_rect)
+        else:
+            pygame.draw.rect(self.screen, (60, 60, 80), buy_btn_rect)
+            pygame.draw.rect(self.screen, (100, 80, 40), sell_btn_rect)
+        
+        pygame.draw.rect(self.screen, (100, 40, 40), exit_btn_rect)
+        
+        buy_text = FONT_NORMAL.render('购买', True, WHITE)
+        sell_text = FONT_NORMAL.render('出售', True, WHITE)
+        exit_text = FONT_NORMAL.render('离开商店', True, WHITE)
+        
+        buy_text_rect = buy_text.get_rect(center=buy_btn_rect.center)
+        sell_text_rect = sell_text.get_rect(center=sell_btn_rect.center)
+        exit_text_rect = exit_text.get_rect(center=exit_btn_rect.center)
+        
+        self.screen.blit(buy_text, buy_text_rect)
+        self.screen.blit(sell_text, sell_text_rect)
+        self.screen.blit(exit_text, exit_text_rect)
+        
+        self.shop_buy_btn = buy_btn_rect
+        self.shop_sell_btn = sell_btn_rect
+        self.shop_exit_btn = exit_btn_rect
     
     def render_game_over(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -830,6 +853,9 @@ class Game:
             if event.type == pygame.QUIT:
                 self.running = False
             
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self.handle_mouse_click(event.pos)
+            
             elif event.type == pygame.KEYDOWN:
                 if self.state == GameState.MENU:
                     self.handle_menu_input(event)
@@ -845,6 +871,60 @@ class Game:
                     self.handle_shop_input(event)
                 elif self.state in [GameState.GAME_OVER, GameState.VICTORY, GameState.LEADERBOARD]:
                     self.state = GameState.MENU
+    
+    def handle_mouse_click(self, pos):
+        if self.state == GameState.SHOP:
+            self.handle_shop_mouse_click(pos)
+    
+    def handle_shop_mouse_click(self, pos):
+        mx, my = pos
+        
+        items_rect = pygame.Rect(SCREEN_WIDTH // 2 - 450 + 20, 150, 860, 420)
+        items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
+        
+        if items_rect.collidepoint(mx, my):
+            relative_y = my - items_rect.y
+            index = relative_y // 30
+            if 0 <= index < len(items) and index < 14:
+                self.shop_selection = index
+        
+        mode_rect = pygame.Rect(SCREEN_WIDTH // 2 - 120, 95, 240, 35)
+        if mode_rect.collidepoint(mx, my):
+            self.shop_mode = 'sell' if self.shop_mode == 'buy' else 'buy'
+            self.shop_selection = 0
+        
+        if hasattr(self, 'shop_buy_btn') and self.shop_buy_btn.collidepoint(mx, my):
+            self.shop_mode = 'buy'
+            self.perform_shop_action()
+        
+        if hasattr(self, 'shop_sell_btn') and self.shop_sell_btn.collidepoint(mx, my):
+            self.shop_mode = 'sell'
+            self.perform_shop_action()
+        
+        if hasattr(self, 'shop_exit_btn') and self.shop_exit_btn.collidepoint(mx, my):
+            self.state = GameState.PLAYING
+    
+    def perform_shop_action(self):
+        items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
+        if not items:
+            return
+        
+        item = items[self.shop_selection]
+        if self.shop_mode == 'buy':
+            if self.player.gold >= item.value:
+                if self.player.add_item(item):
+                    self.player.gold -= item.value
+                    self.shop.inventory.remove(item)
+                    self.add_message(f'购买了 {item.name}！')
+                else:
+                    self.add_message('背包已满！')
+            else:
+                self.add_message('金币不足！')
+        else:
+            sell_price = max(1, item.value // 2)
+            self.player.gold += sell_price
+            self.player.remove_item(item)
+            self.add_message(f'出售了 {item.name}，获得 {sell_price} 金币！')
     
     def handle_menu_input(self, event):
         if event.key in [pygame.K_UP, pygame.K_w]:
@@ -879,13 +959,13 @@ class Game:
             self.state = GameState.MENU
     
     def handle_game_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w]:
+        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
             self.move_player(0, -1)
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
             self.move_player(0, 1)
-        elif event.key in [pygame.K_LEFT, pygame.K_a]:
+        elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_A]:
             self.move_player(-1, 0)
-        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+        elif event.key in [pygame.K_RIGHT, pygame.K_d, pygame.K_D]:
             self.move_player(1, 0)
         elif event.key == pygame.K_SPACE:
             for monster in self.monsters:
@@ -895,7 +975,7 @@ class Game:
                         self.monsters.remove(monster)
                     self.end_player_turn()
                     break
-        elif event.key == pygame.K_i:
+        elif event.key in [pygame.K_i, pygame.K_I]:
             self.state = GameState.INVENTORY
             self.inventory_selection = 0
         elif event.key == pygame.K_ESCAPE:
@@ -903,9 +983,9 @@ class Game:
             self.menu_selection = 0
     
     def handle_pause_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w]:
+        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
             self.menu_selection = (self.menu_selection - 1) % 3
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
             self.menu_selection = (self.menu_selection + 1) % 3
         elif event.key == pygame.K_RETURN:
             if self.menu_selection == 0:
@@ -926,13 +1006,13 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_inventory_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w]:
+        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
             if self.inventory_selection > 0:
                 self.inventory_selection -= 1
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
             if self.inventory_selection < len(self.player.inventory) - 1:
                 self.inventory_selection += 1
-        elif event.key == pygame.K_e:
+        elif event.key in [pygame.K_e, pygame.K_E]:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'slot'):
@@ -940,7 +1020,7 @@ class Game:
                         self.add_message(f'装备了 {item.name}！')
                     else:
                         self.add_message(f'无法装备 {item.name}！')
-        elif event.key == pygame.K_u:
+        elif event.key in [pygame.K_u, pygame.K_U]:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'use'):
@@ -954,10 +1034,10 @@ class Game:
     
     def handle_shop_input(self, event):
         items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
-        if event.key in [pygame.K_UP, pygame.K_w]:
+        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
             if self.shop_selection > 0:
                 self.shop_selection -= 1
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
             if self.shop_selection < len(items) - 1:
                 self.shop_selection += 1
         elif event.key == pygame.K_TAB:
