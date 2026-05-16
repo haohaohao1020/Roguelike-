@@ -3,8 +3,6 @@ from .config import *
 
 class CombatSystem:
     def __init__(self):
-        self.damage_numbers = []
-        self.effects = []
         self.log = []
     
     def attack(self, attacker, target):
@@ -16,7 +14,6 @@ class CombatSystem:
         
         if random.randint(0, 100) < evasion:
             self.add_log(f'{target.name} 闪避了攻击！')
-            self.add_damage_number(target.x, target.y, 'MISS', GRAY)
             return False
         
         damage = attack_power + random.randint(-5, 5)
@@ -28,8 +25,7 @@ class CombatSystem:
             target.hp -= damage
             actual_damage = damage
         
-        self.add_log(f'{attacker.name} 对 {target.name} 造成了 {actual_damage} 点伤害！')
-        self.add_damage_number(target.x, target.y, str(actual_damage), RED)
+        self.add_log(f'{attacker.name} 对 {target.name} 造成了伤害！')
         
         if hasattr(target, 'is_alive'):
             if not target.is_alive():
@@ -49,9 +45,7 @@ class CombatSystem:
             target.hp -= damage
             actual_damage = damage
         
-        self.add_log(f'{caster.name} 使用 {spell_name} 对 {target.name} 造成了 {actual_damage} 点伤害！')
-        self.add_damage_number(target.x, target.y, str(actual_damage), BLUE)
-        self.add_effect(target.x, target.y, 'magic')
+        self.add_log(f'{caster.name} 使用 {spell_name}！')
         
         if hasattr(target, 'is_alive'):
             if not target.is_alive():
@@ -66,47 +60,31 @@ class CombatSystem:
         
         if hasattr(killer, 'gain_exp') and hasattr(victim, 'exp'):
             killer.gain_exp(victim.exp)
-            self.add_log(f'{killer.name} 获得了 {victim.exp} 点经验！')
+            self.add_log(f'{killer.name} 获得了经验！')
         
         if hasattr(killer, 'gold') and hasattr(victim, 'gold'):
             killer.gold += victim.gold
-            self.add_log(f'{killer.name} 获得了 {victim.gold} 金币！')
+            self.add_log(f'{killer.name} 获得了金币！')
     
     def use_skill(self, user, skill_name, target=None):
         if skill_name == 'power_strike':
-            if user.mp >= 10:
+            if user.mp >= 10 and target:
                 user.mp -= 10
-                if target:
-                    damage = user.get_attack_power() * 2
-                    actual = target.take_damage(damage)
-                    self.add_log(f'{user.name} 使用强力一击造成了 {actual} 点伤害！')
-                    self.add_damage_number(target.x, target.y, str(actual), ORANGE)
+                damage = user.get_attack_power() * 2
+                actual = target.take_damage(damage)
+                self.add_log(f'{user.name} 使用强力一击！')
         elif skill_name == 'fireball':
-            if user.mp >= 20:
+            if user.mp >= 20 and target:
                 user.mp -= 20
-                if target:
-                    self.magic_attack(user, target, '火球术', 30)
+                self.magic_attack(user, target, '火球术', 30)
         elif skill_name == 'backstab':
-            if user.mp >= 15:
+            if user.mp >= 15 and target:
                 user.mp -= 15
-                if target:
-                    damage = user.get_attack_power() * 3
-                    actual = target.take_damage(damage)
-                    self.add_log(f'{user.name} 使用背刺造成了 {actual} 点伤害！')
-                    self.add_damage_number(target.x, target.y, str(actual), YELLOW)
+                damage = user.get_attack_power() * 3
+                actual = target.take_damage(damage)
+                self.add_log(f'{user.name} 使用背刺！')
         
         return True
-    
-    def add_damage_number(self, x, y, text, color):
-        self.damage_numbers.append({
-            'x': x, 'y': y, 'text': text, 'color': color,
-            'timer': 60, 'offset_y': 0
-        })
-    
-    def add_effect(self, x, y, effect_type):
-        self.effects.append({
-            'x': x, 'y': y, 'type': effect_type, 'timer': 30, 'frame': 0
-        })
     
     def add_log(self, message):
         self.log.append(message)
@@ -114,14 +92,4 @@ class CombatSystem:
             self.log.pop(0)
     
     def update(self):
-        for dn in self.damage_numbers[:]:
-            dn['timer'] -= 1
-            dn['offset_y'] -= 1
-            if dn['timer'] <= 0:
-                self.damage_numbers.remove(dn)
-        
-        for ef in self.effects[:]:
-            ef['timer'] -= 1
-            ef['frame'] += 1
-            if ef['timer'] <= 0:
-                self.effects.remove(ef)
+        pass

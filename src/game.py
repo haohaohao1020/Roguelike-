@@ -8,6 +8,7 @@ from .items import Chest, create_random_item, Potion, Gold
 from .combat import CombatSystem
 from .save_manager import SaveManager, Shop
 from .asset_loader import asset_loader
+from .renderer import DungeonRenderer, MonsterRenderer, PlayerRenderer
 
 class GameState:
     MENU = 'menu'
@@ -31,6 +32,10 @@ class Game:
         self.save_manager = SaveManager()
         self.combat = CombatSystem()
         self.shop = Shop()
+        
+        self.dungeon_renderer = DungeonRenderer()
+        self.monster_renderer = MonsterRenderer()
+        self.player_renderer = PlayerRenderer()
         
         self.state = GameState.MENU
         self.floor = 1
@@ -263,144 +268,58 @@ class Game:
         
         for x in range(start_x, end_x):
             for y in range(start_y, end_y):
-                screen_x = x * TILE_SIZE - int(self.camera_x)
-                screen_y = y * TILE_SIZE - int(self.camera_y)
-                
                 if self.game_map.explored[x][y]:
                     tile = self.game_map.tiles[x][y]
                     
                     if tile == 0:
                         room = self.game_map.get_room_at(x, y)
-                        if room:
-                            color = self.get_room_color(room.room_type)
-                            if not self.game_map.visible[x][y]:
-                                color = (color[0] // 3, color[1] // 3, color[2] // 3)
-                            pygame.draw.rect(self.screen, color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
-                            
-                            if x == room.x1 or x == room.x2 - 1:
-                                wall_color = (color[0] + 30, color[1] + 30, color[2] + 30)
-                                pygame.draw.line(self.screen, wall_color, (screen_x, screen_y), (screen_x, screen_y + TILE_SIZE), 2)
-                            if y == room.y1 or y == room.y2 - 1:
-                                wall_color = (color[0] + 30, color[1] + 30, color[2] + 30)
-                                pygame.draw.line(self.screen, wall_color, (screen_x, screen_y), (screen_x + TILE_SIZE, screen_y), 2)
-                        else:
-                            base_color = (60, 40, 30)
-                            if not self.game_map.visible[x][y]:
-                                base_color = (20, 15, 10)
-                            pygame.draw.rect(self.screen, base_color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                        room_type = room.room_type if room else 'corridor'
+                        self.dungeon_renderer.draw_floor(self.screen, x, y, self.camera_x, self.camera_y, room_type, self.game_map.visible[x][y])
                     else:
-                        wall_color = (50, 50, 60) if self.game_map.visible[x][y] else (20, 20, 25)
-                        pygame.draw.rect(self.screen, wall_color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
-                        pygame.draw.rect(self.screen, (30, 30, 40), (screen_x + 2, screen_y + 2, TILE_SIZE - 4, TILE_SIZE - 4), 1)
+                        self.dungeon_renderer.draw_wall(self.screen, x, y, self.camera_x, self.camera_y, self.game_map.visible[x][y])
                 else:
+                    screen_x = x * TILE_SIZE - int(self.camera_x)
+                    screen_y = y * TILE_SIZE - int(self.camera_y)
                     pygame.draw.rect(self.screen, (5, 5, 8), (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
             if self.game_map.explored[sx][sy]:
-                screen_x = sx * TILE_SIZE - int(self.camera_x)
-                screen_y = sy * TILE_SIZE - int(self.camera_y)
-                
-                if self.game_map.visible[sx][sy]:
-                    pygame.draw.rect(self.screen, (200, 200, 0), (screen_x + 4, screen_y + 4, TILE_SIZE - 8, TILE_SIZE - 8))
-                    pygame.draw.rect(self.screen, (255, 255, 0), (screen_x + 8, screen_y + 8, TILE_SIZE - 16, TILE_SIZE - 16), 2)
-                    
-                    text = FONT_SMALL.render('楼梯', True, BLACK)
-                    text_rect = text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2))
-                    self.screen.blit(text, text_rect)
+                self.dungeon_renderer.draw_stairs(self.screen, sx, sy, self.camera_x, self.camera_y, self.game_map.visible[sx][sy])
         
         for item in self.items:
-            if self.game_map.explored[item.x][item.y]:
-                screen_x = item.x * TILE_SIZE - int(self.camera_x)
-                screen_y = item.y * TILE_SIZE - int(self.camera_y)
-                
-                if self.game_map.visible[item.x][item.y]:
-                    if hasattr(item, 'is_open'):
-                        if not item.is_open:
-                            pygame.draw.rect(self.screen, (139, 69, 19), (screen_x + 6, screen_y + 8, TILE_SIZE - 12, TILE_SIZE - 14))
-                            pygame.draw.rect(self.screen, (100, 50, 10), (screen_x + 6, screen_y + 8, TILE_SIZE - 12, 6))
-                            pygame.draw.rect(self.screen, GOLD, (screen_x + TILE_SIZE // 2 - 3, screen_y + 12, 6, 6))
-                        else:
-                            pygame.draw.rect(self.screen, (80, 40, 10), (screen_x + 6, screen_y + 12, TILE_SIZE - 12, TILE_SIZE - 18))
-                    elif hasattr(item, 'amount'):
-                        pygame.draw.circle(self.screen, GOLD, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 8)
-                        pygame.draw.circle(self.screen, (200, 170, 0), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 5)
-                    elif hasattr(item, 'potion_type'):
-                        if item.potion_type == 'health':
-                            color = RED
-                        elif item.potion_type == 'mana':
-                            color = BLUE
-                        else:
-                            color = GREEN
-                        pygame.draw.circle(self.screen, color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 10)
-                        pygame.draw.circle(self.screen, WHITE, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 6, 2)
-                    else:
-                        pygame.draw.rect(self.screen, (150, 150, 150), (screen_x + 8, screen_y + 8, TILE_SIZE - 16, TILE_SIZE - 16))
+            if self.game_map.explored[item.x][item.y] and self.game_map.visible[item.x][item.y]:
+                if hasattr(item, 'is_open'):
+                    self.dungeon_renderer.draw_chest(self.screen, item.x, item.y, self.camera_x, self.camera_y, item.is_open, True)
+                elif hasattr(item, 'amount'):
+                    self.dungeon_renderer.draw_gold(self.screen, item.x, item.y, self.camera_x, self.camera_y, item.amount, True)
         
         for monster in self.monsters:
-            if self.game_map.explored[monster.x][monster.y]:
-                screen_x = monster.x * TILE_SIZE - int(self.camera_x)
-                screen_y = monster.y * TILE_SIZE - int(self.camera_y)
-                
-                if self.game_map.visible[monster.x][monster.y]:
-                    body_color = monster.color
-                    
-                    if monster.is_hurt:
-                        body_color = WHITE
-                    
-                    if monster.monster_type == 'boss':
-                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 16)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 5, screen_y + TILE_SIZE // 2 - 2), 4)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 5, screen_y + TILE_SIZE // 2 - 2), 4)
-                        pygame.draw.line(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 5, screen_y + TILE_SIZE // 2 + 6), (screen_x + TILE_SIZE // 2 + 5, screen_y + TILE_SIZE // 2 + 6), 2)
-                    elif monster.monster_type == 'elite':
-                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 14)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 4, screen_y + TILE_SIZE // 2 - 2), 3)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 4, screen_y + TILE_SIZE // 2 - 2), 3)
+            if self.game_map.explored[monster.x][monster.y] and self.game_map.visible[monster.x][monster.y]:
+                if monster.monster_type == 'boss':
+                    self.monster_renderer.draw_dragon(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                elif monster.monster_type == 'elite':
+                    self.monster_renderer.draw_elite_orc(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                else:
+                    monster_name = monster.name
+                    if '哥布林' in monster_name:
+                        self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '兽人' in monster_name:
+                        self.monster_renderer.draw_orc(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '骷髅' in monster_name:
+                        self.monster_renderer.draw_skeleton(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '法师' in monster_name:
+                        self.monster_renderer.draw_mage(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
                     else:
-                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 12)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 3, screen_y + TILE_SIZE // 2 - 2), 2)
-                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 3, screen_y + TILE_SIZE // 2 - 2), 2)
-                    
-                    hp_ratio = monster.hp / monster.max_hp
-                    bar_width = TILE_SIZE - 4
-                    pygame.draw.rect(self.screen, (80, 0, 0), (screen_x + 2, screen_y - 8, bar_width, 5))
-                    pygame.draw.rect(self.screen, (0, 200, 0), (screen_x + 2, screen_y - 8, int(bar_width * hp_ratio), 5))
-                    
-                    name_text = FONT_SMALL.render(monster.name, True, WHITE)
-                    name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 14))
-                    self.screen.blit(name_text, name_rect)
-        
-        player_screen_x = self.player.x * TILE_SIZE - int(self.camera_x)
-        player_screen_y = self.player.y * TILE_SIZE - int(self.camera_y)
-        
-        player_color = CYAN
-        if self.player.is_hurt:
-            player_color = WHITE
-        
-        pygame.draw.circle(self.screen, player_color, (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 14)
-        pygame.draw.circle(self.screen, (0, 150, 200), (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 10, 2)
-        
-        pygame.draw.circle(self.screen, WHITE, (player_screen_x + TILE_SIZE // 2 - 4, player_screen_y + TILE_SIZE // 2 - 3), 3)
-        pygame.draw.circle(self.screen, WHITE, (player_screen_x + TILE_SIZE // 2 + 4, player_screen_y + TILE_SIZE // 2 - 3), 3)
-        pygame.draw.circle(self.screen, BLACK, (player_screen_x + TILE_SIZE // 2 - 4, player_screen_y + TILE_SIZE // 2 - 3), 1)
-        pygame.draw.circle(self.screen, BLACK, (player_screen_x + TILE_SIZE // 2 + 4, player_screen_y + TILE_SIZE // 2 - 3), 1)
+                        self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
         
         class_name = CLASSES[self.player.class_type]['name']
         if class_name == '战士':
-            pygame.draw.rect(self.screen, (200, 150, 50), (player_screen_x + 8, player_screen_y + 16, 16, 10))
+            self.player_renderer.draw_warrior(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
         elif class_name == '法师':
-            pygame.draw.rect(self.screen, PURPLE, (player_screen_x + 14, player_screen_y + 2, 4, 20))
-            pygame.draw.circle(self.screen, BLUE, (player_screen_x + 16, player_screen_y + 4), 4)
+            self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
         elif class_name == '盗贼':
-            pygame.draw.circle(self.screen, (100, 100, 100), (player_screen_x + 22, player_screen_y + 18), 5)
-        
-        for dn in self.combat.damage_numbers:
-            screen_x = dn['x'] * TILE_SIZE - int(self.camera_x) + TILE_SIZE // 2
-            screen_y = dn['y'] * TILE_SIZE - int(self.camera_y) + dn['offset_y']
-            text = FONT_NORMAL.render(dn['text'], True, dn['color'])
-            text_rect = text.get_rect(center=(screen_x, screen_y))
-            self.screen.blit(text, text_rect)
+            self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
         
         self.render_ui()
     
