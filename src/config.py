@@ -83,7 +83,24 @@ EQUIPMENT_SLOTS = ['weapon', 'armor', 'helmet', 'boots', 'accessory']
 MAX_FLOOR = 5
 
 pygame.font.init()
-FONT_SMALL = pygame.font.Font(None, 20)
-FONT_NORMAL = pygame.font.Font(None, 24)
-FONT_LARGE = pygame.font.Font(None, 36)
-FONT_TITLE = pygame.font.Font(None, 48)
+
+def get_chinese_font(size):
+    font_paths = [
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"
+    ]
+    for path in font_paths:
+        try:
+            if os.path.exists(path):
+                return pygame.font.Font(path, size)
+        except:
+            continue
+    return pygame.font.Font(None, size)
+
+FONT_SMALL = get_chinese_font(20)
+FONT_NORMAL = get_chinese_font(24)
+FONT_LARGE = get_chinese_font(36)
+FONT_TITLE = get_chinese_font(48)

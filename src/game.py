@@ -4,7 +4,7 @@ from .config import *
 from .map import GameMap
 from .entity import Character
 from .monster import create_monster, create_elite, create_boss
-from .items import Chest, create_random_item, Potion
+from .items import Chest, create_random_item, Potion, Gold
 from .combat import CombatSystem
 from .save_manager import SaveManager, Shop
 from .asset_loader import asset_loader
@@ -53,6 +53,7 @@ class Game:
         self.shop_mode = 'buy'
         
         self.message_log = []
+        self.room_colors = {}
     
     def add_message(self, text):
         self.message_log.append(text)
@@ -71,40 +72,57 @@ class Game:
             self.player.x, self.player.y = start_room.center()
         
         for room in self.game_map.rooms:
+            room_color = self.get_room_color(room.room_type)
+            self.room_colors[(room.x1, room.y1, room.x2, room.y2)] = room_color
+            
             if room.room_type == 'normal':
                 num_monsters = random.randint(2, 4)
                 for _ in range(num_monsters):
                     x, y = room.get_random_position()
-                    if not any(e.x == x and e.y == y for e in self.monsters):
+                    if not any(m.x == x and m.y == y for m in self.monsters):
                         monster = create_monster(x, y, self.floor)
                         self.monsters.append(monster)
             elif room.room_type == 'treasure':
                 x, y = room.center()
                 self.items.append(Chest(x, y))
-            elif room.room_type == 'trap':
-                pass
+            elif room.room_type == 'boss':
+                if self.floor >= MAX_FLOOR:
+                    x, y = room.center()
+                    boss = create_boss(x, y, self.floor)
+                    self.monsters.append(boss)
+                else:
+                    if random.random() < 0.4:
+                        x, y = room.get_random_position()
+                        elite = create_elite(x, y, self.floor)
+                        self.monsters.append(elite)
         
         for room in self.game_map.rooms:
             if room.room_type != 'boss' and random.random() < 0.3:
                 x, y = room.get_random_position()
                 if not any(e.x == x and e.y == y for e in self.monsters + self.items):
-                    item = create_random_item(x, y)
-                    if item:
-                        self.items.append(item)
-        
-        if self.game_map.rooms:
-            boss_room = self.game_map.rooms[-1]
-            if self.floor >= MAX_FLOOR:
-                x, y = boss_room.center()
-                boss = create_boss(x, y, self.floor)
-                self.monsters.append(boss)
-            else:
-                if random.random() < 0.3:
-                    x, y = boss_room.get_random_position()
-                    elite = create_elite(x, y, self.floor)
-                    self.monsters.append(elite)
+                    item_type = random.choice(['gold', 'potion', 'equipment'])
+                    if item_type == 'gold':
+                        self.items.append(Gold(x, y, random.randint(10, 50)))
+                    elif item_type == 'potion':
+                        potion_type = random.choice(['health', 'mana'])
+                        self.items.append(Potion(x, y, potion_type))
+                    else:
+                        item = create_random_item(x, y)
+                        if item:
+                            self.items.append(item)
         
         self.update_camera()
+    
+    def get_room_color(self, room_type):
+        colors = {
+            'normal': (80, 60, 40),
+            'treasure': (100, 80, 20),
+            'shop': (40, 60, 80),
+            'rest': (40, 80, 40),
+            'trap': (80, 20, 20),
+            'boss': (60, 20, 60)
+        }
+        return colors.get(room_type, (80, 60, 40))
     
     def new_game(self, class_type):
         self.player = Character(MAP_WIDTH // 2, MAP_HEIGHT // 2, '勇者', class_type)
@@ -143,7 +161,8 @@ class Game:
                 if hasattr(item, 'is_open') and not item.is_open:
                     msg = item.open(self.player)
                     self.add_message(msg)
-                elif item.item_type == 'gold':
+                    self.items.remove(item)
+                elif hasattr(item, 'amount'):
                     self.player.gold += item.amount
                     self.items.remove(item)
                     self.add_message(f'拾取了 {item.amount} 金币！')
@@ -152,18 +171,21 @@ class Game:
                         self.items.remove(item)
                         self.add_message(f'拾取了 {item.name}！')
         
-        if self.game_map.is_walkable(new_x, new_y):
-            self.player.move(dx, dy)
-            self.update_camera()
+        if 0 <= new_x < MAP_WIDTH and 0 <= new_y < MAP_HEIGHT:
+            if self.game_map.tiles[new_x][new_y] == 0:
+                self.player.move(dx, dy)
+                self.update_camera()
         
         room = self.game_map.get_room_at(self.player.x, self.player.y)
         if room and room.room_type == 'shop':
             self.state = GameState.SHOP
             self.shop.refresh_items()
         elif room and room.room_type == 'rest':
-            self.player.heal(30)
-            self.player.restore_mp(20)
-            self.add_message('在休息点恢复了生命和魔力！')
+            heal_amount = int(self.player.max_hp * 0.3)
+            mp_amount = int(self.player.max_mp * 0.3)
+            self.player.heal(heal_amount)
+            self.player.restore_mp(mp_amount)
+            self.add_message(f'在休息点恢复了 {heal_amount} 生命和 {mp_amount} 魔力！')
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
@@ -200,13 +222,17 @@ class Game:
         self.player_turn = True
     
     def update_camera(self):
-        self.camera_x = self.player.x * TILE_SIZE - SCREEN_WIDTH // 2
-        self.camera_y = self.player.y * TILE_SIZE - SCREEN_HEIGHT // 2
+        target_x = self.player.x * TILE_SIZE - SCREEN_WIDTH // 2
+        target_y = self.player.y * TILE_SIZE - SCREEN_HEIGHT // 2
+        
+        self.camera_x += (target_x - self.camera_x) * 0.1
+        self.camera_y += (target_y - self.camera_y) * 0.1
+        
         self.camera_x = max(0, min(self.camera_x, MAP_WIDTH * TILE_SIZE - SCREEN_WIDTH))
         self.camera_y = max(0, min(self.camera_y, MAP_HEIGHT * TILE_SIZE - SCREEN_HEIGHT))
     
     def render(self):
-        self.screen.fill(BLACK)
+        self.screen.fill((10, 10, 15))
         
         if self.state == GameState.MENU:
             self.render_menu()
@@ -230,287 +256,641 @@ class Game:
         pygame.display.flip()
     
     def render_game(self):
-        start_x = max(0, self.camera_x // TILE_SIZE)
-        start_y = max(0, self.camera_y // TILE_SIZE)
-        end_x = min(MAP_WIDTH, (self.camera_x + SCREEN_WIDTH) // TILE_SIZE + 1)
-        end_y = min(MAP_HEIGHT, (self.camera_y + SCREEN_HEIGHT) // TILE_SIZE + 1)
+        start_x = max(0, int(self.camera_x // TILE_SIZE) - 1)
+        start_y = max(0, int(self.camera_y // TILE_SIZE) - 1)
+        end_x = min(MAP_WIDTH, int((self.camera_x + SCREEN_WIDTH) // TILE_SIZE) + 2)
+        end_y = min(MAP_HEIGHT, int((self.camera_y + SCREEN_HEIGHT) // TILE_SIZE) + 2)
         
         for x in range(start_x, end_x):
             for y in range(start_y, end_y):
+                screen_x = x * TILE_SIZE - int(self.camera_x)
+                screen_y = y * TILE_SIZE - int(self.camera_y)
+                
                 if self.game_map.explored[x][y]:
                     tile = self.game_map.tiles[x][y]
-                    screen_x = x * TILE_SIZE - self.camera_x
-                    screen_y = y * TILE_SIZE - self.camera_y
                     
                     if tile == 0:
-                        color = (100, 80, 60) if self.game_map.visible[x][y] else (50, 40, 30)
+                        room = self.game_map.get_room_at(x, y)
+                        if room:
+                            color = self.get_room_color(room.room_type)
+                            if not self.game_map.visible[x][y]:
+                                color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                            pygame.draw.rect(self.screen, color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                            
+                            if x == room.x1 or x == room.x2 - 1:
+                                wall_color = (color[0] + 30, color[1] + 30, color[2] + 30)
+                                pygame.draw.line(self.screen, wall_color, (screen_x, screen_y), (screen_x, screen_y + TILE_SIZE), 2)
+                            if y == room.y1 or y == room.y2 - 1:
+                                wall_color = (color[0] + 30, color[1] + 30, color[2] + 30)
+                                pygame.draw.line(self.screen, wall_color, (screen_x, screen_y), (screen_x + TILE_SIZE, screen_y), 2)
+                        else:
+                            base_color = (60, 40, 30)
+                            if not self.game_map.visible[x][y]:
+                                base_color = (20, 15, 10)
+                            pygame.draw.rect(self.screen, base_color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
                     else:
-                        color = (50, 50, 50) if self.game_map.visible[x][y] else (30, 30, 30)
-                    
-                    pygame.draw.rect(self.screen, color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                        wall_color = (50, 50, 60) if self.game_map.visible[x][y] else (20, 20, 25)
+                        pygame.draw.rect(self.screen, wall_color, (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
+                        pygame.draw.rect(self.screen, (30, 30, 40), (screen_x + 2, screen_y + 2, TILE_SIZE - 4, TILE_SIZE - 4), 1)
+                else:
+                    pygame.draw.rect(self.screen, (5, 5, 8), (screen_x, screen_y, TILE_SIZE, TILE_SIZE))
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
             if self.game_map.explored[sx][sy]:
-                screen_x = sx * TILE_SIZE - self.camera_x
-                screen_y = sy * TILE_SIZE - self.camera_y
-                pygame.draw.rect(self.screen, (200, 200, 0), (screen_x + 8, screen_y + 8, 16, 16))
+                screen_x = sx * TILE_SIZE - int(self.camera_x)
+                screen_y = sy * TILE_SIZE - int(self.camera_y)
+                
+                if self.game_map.visible[sx][sy]:
+                    pygame.draw.rect(self.screen, (200, 200, 0), (screen_x + 4, screen_y + 4, TILE_SIZE - 8, TILE_SIZE - 8))
+                    pygame.draw.rect(self.screen, (255, 255, 0), (screen_x + 8, screen_y + 8, TILE_SIZE - 16, TILE_SIZE - 16), 2)
+                    
+                    text = FONT_SMALL.render('楼梯', True, BLACK)
+                    text_rect = text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2))
+                    self.screen.blit(text, text_rect)
         
         for item in self.items:
-            if self.game_map.visible[item.x][item.y]:
-                screen_x = item.x * TILE_SIZE - self.camera_x
-                screen_y = item.y * TILE_SIZE - self.camera_y
-                color = GOLD if hasattr(item, 'is_open') else item.color
-                pygame.draw.circle(self.screen, color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 8)
+            if self.game_map.explored[item.x][item.y]:
+                screen_x = item.x * TILE_SIZE - int(self.camera_x)
+                screen_y = item.y * TILE_SIZE - int(self.camera_y)
+                
+                if self.game_map.visible[item.x][item.y]:
+                    if hasattr(item, 'is_open'):
+                        if not item.is_open:
+                            pygame.draw.rect(self.screen, (139, 69, 19), (screen_x + 6, screen_y + 8, TILE_SIZE - 12, TILE_SIZE - 14))
+                            pygame.draw.rect(self.screen, (100, 50, 10), (screen_x + 6, screen_y + 8, TILE_SIZE - 12, 6))
+                            pygame.draw.rect(self.screen, GOLD, (screen_x + TILE_SIZE // 2 - 3, screen_y + 12, 6, 6))
+                        else:
+                            pygame.draw.rect(self.screen, (80, 40, 10), (screen_x + 6, screen_y + 12, TILE_SIZE - 12, TILE_SIZE - 18))
+                    elif hasattr(item, 'amount'):
+                        pygame.draw.circle(self.screen, GOLD, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 8)
+                        pygame.draw.circle(self.screen, (200, 170, 0), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 5)
+                    elif hasattr(item, 'potion_type'):
+                        if item.potion_type == 'health':
+                            color = RED
+                        elif item.potion_type == 'mana':
+                            color = BLUE
+                        else:
+                            color = GREEN
+                        pygame.draw.circle(self.screen, color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 10)
+                        pygame.draw.circle(self.screen, WHITE, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 6, 2)
+                    else:
+                        pygame.draw.rect(self.screen, (150, 150, 150), (screen_x + 8, screen_y + 8, TILE_SIZE - 16, TILE_SIZE - 16))
         
         for monster in self.monsters:
-            if self.game_map.visible[monster.x][monster.y]:
-                screen_x = monster.x * TILE_SIZE - self.camera_x
-                screen_y = monster.y * TILE_SIZE - self.camera_y
+            if self.game_map.explored[monster.x][monster.y]:
+                screen_x = monster.x * TILE_SIZE - int(self.camera_x)
+                screen_y = monster.y * TILE_SIZE - int(self.camera_y)
                 
-                if monster.is_hurt:
-                    pygame.draw.circle(self.screen, WHITE, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 14)
-                
-                pygame.draw.circle(self.screen, monster.color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 12)
-                
-                hp_ratio = monster.hp / monster.max_hp
-                hp_width = int(TILE_SIZE * hp_ratio)
-                pygame.draw.rect(self.screen, RED, (screen_x, screen_y - 6, TILE_SIZE, 4))
-                pygame.draw.rect(self.screen, GREEN, (screen_x, screen_y - 6, hp_width, 4))
+                if self.game_map.visible[monster.x][monster.y]:
+                    body_color = monster.color
+                    
+                    if monster.is_hurt:
+                        body_color = WHITE
+                    
+                    if monster.monster_type == 'boss':
+                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 16)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 5, screen_y + TILE_SIZE // 2 - 2), 4)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 5, screen_y + TILE_SIZE // 2 - 2), 4)
+                        pygame.draw.line(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 5, screen_y + TILE_SIZE // 2 + 6), (screen_x + TILE_SIZE // 2 + 5, screen_y + TILE_SIZE // 2 + 6), 2)
+                    elif monster.monster_type == 'elite':
+                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 14)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 4, screen_y + TILE_SIZE // 2 - 2), 3)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 4, screen_y + TILE_SIZE // 2 - 2), 3)
+                    else:
+                        pygame.draw.circle(self.screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 12)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 - 3, screen_y + TILE_SIZE // 2 - 2), 2)
+                        pygame.draw.circle(self.screen, BLACK, (screen_x + TILE_SIZE // 2 + 3, screen_y + TILE_SIZE // 2 - 2), 2)
+                    
+                    hp_ratio = monster.hp / monster.max_hp
+                    bar_width = TILE_SIZE - 4
+                    pygame.draw.rect(self.screen, (80, 0, 0), (screen_x + 2, screen_y - 8, bar_width, 5))
+                    pygame.draw.rect(self.screen, (0, 200, 0), (screen_x + 2, screen_y - 8, int(bar_width * hp_ratio), 5))
+                    
+                    name_text = FONT_SMALL.render(monster.name, True, WHITE)
+                    name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 14))
+                    self.screen.blit(name_text, name_rect)
         
-        player_screen_x = self.player.x * TILE_SIZE - self.camera_x
-        player_screen_y = self.player.y * TILE_SIZE - self.camera_y
+        player_screen_x = self.player.x * TILE_SIZE - int(self.camera_x)
+        player_screen_y = self.player.y * TILE_SIZE - int(self.camera_y)
         
+        player_color = CYAN
         if self.player.is_hurt:
-            pygame.draw.circle(self.screen, WHITE, (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 16)
+            player_color = WHITE
         
-        pygame.draw.circle(self.screen, CYAN, (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 14)
+        pygame.draw.circle(self.screen, player_color, (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 14)
+        pygame.draw.circle(self.screen, (0, 150, 200), (player_screen_x + TILE_SIZE // 2, player_screen_y + TILE_SIZE // 2), 10, 2)
+        
+        pygame.draw.circle(self.screen, WHITE, (player_screen_x + TILE_SIZE // 2 - 4, player_screen_y + TILE_SIZE // 2 - 3), 3)
+        pygame.draw.circle(self.screen, WHITE, (player_screen_x + TILE_SIZE // 2 + 4, player_screen_y + TILE_SIZE // 2 - 3), 3)
+        pygame.draw.circle(self.screen, BLACK, (player_screen_x + TILE_SIZE // 2 - 4, player_screen_y + TILE_SIZE // 2 - 3), 1)
+        pygame.draw.circle(self.screen, BLACK, (player_screen_x + TILE_SIZE // 2 + 4, player_screen_y + TILE_SIZE // 2 - 3), 1)
+        
+        class_name = CLASSES[self.player.class_type]['name']
+        if class_name == '战士':
+            pygame.draw.rect(self.screen, (200, 150, 50), (player_screen_x + 8, player_screen_y + 16, 16, 10))
+        elif class_name == '法师':
+            pygame.draw.rect(self.screen, PURPLE, (player_screen_x + 14, player_screen_y + 2, 4, 20))
+            pygame.draw.circle(self.screen, BLUE, (player_screen_x + 16, player_screen_y + 4), 4)
+        elif class_name == '盗贼':
+            pygame.draw.circle(self.screen, (100, 100, 100), (player_screen_x + 22, player_screen_y + 18), 5)
         
         for dn in self.combat.damage_numbers:
-            screen_x = dn['x'] * TILE_SIZE - self.camera_x + TILE_SIZE // 2
-            screen_y = dn['y'] * TILE_SIZE - self.camera_y + dn['offset_y']
+            screen_x = dn['x'] * TILE_SIZE - int(self.camera_x) + TILE_SIZE // 2
+            screen_y = dn['y'] * TILE_SIZE - int(self.camera_y) + dn['offset_y']
             text = FONT_NORMAL.render(dn['text'], True, dn['color'])
-            self.screen.blit(text, (screen_x - text.get_width() // 2, screen_y))
+            text_rect = text.get_rect(center=(screen_x, screen_y))
+            self.screen.blit(text, text_rect)
         
         self.render_ui()
     
     def render_ui(self):
-        ui_bg = (30, 30, 30, 200)
+        panel_rect = pygame.Rect(SCREEN_WIDTH - 260, 10, 250, 200)
+        pygame.draw.rect(self.screen, (30, 30, 40), panel_rect)
+        pygame.draw.rect(self.screen, (80, 80, 100), panel_rect, 2)
         
-        panel_rect = pygame.Rect(SCREEN_WIDTH - 250, 10, 240, 180)
-        pygame.draw.rect(self.screen, (40, 40, 40), panel_rect)
-        pygame.draw.rect(self.screen, (100, 100, 100), panel_rect, 2)
-        
-        y = panel_rect.y + 10
+        y = panel_rect.y + 15
         
         class_name = CLASSES[self.player.class_type]['name']
-        text = FONT_NORMAL.render(f'{class_name} Lv.{self.player.level}', True, WHITE)
-        self.screen.blit(text, (panel_rect.x + 10, y))
-        y += 25
+        title_text = FONT_LARGE.render(f'{class_name}', True, GOLD)
+        level_text = FONT_NORMAL.render(f'Lv.{self.player.level}', True, WHITE)
+        self.screen.blit(title_text, (panel_rect.x + 15, y))
+        self.screen.blit(level_text, (panel_rect.x + 120, y + 5))
+        y += 40
         
         hp_ratio = self.player.hp / self.player.max_hp
-        pygame.draw.rect(self.screen, (100, 0, 0), (panel_rect.x + 10, y, 220, 20))
-        pygame.draw.rect(self.screen, RED, (panel_rect.x + 10, y, int(220 * hp_ratio), 20))
-        text = FONT_SMALL.render(f'HP: {self.player.hp}/{self.player.max_hp}', True, WHITE)
-        self.screen.blit(text, (panel_rect.x + 15, y + 2))
-        y += 30
+        pygame.draw.rect(self.screen, (80, 0, 0), (panel_rect.x + 15, y, 220, 18))
+        pygame.draw.rect(self.screen, (220, 50, 50), (panel_rect.x + 15, y, int(220 * hp_ratio), 18))
+        pygame.draw.rect(self.screen, (255, 100, 100), (panel_rect.x + 15, y, int(220 * hp_ratio), 6))
+        hp_text = FONT_SMALL.render(f'生命值: {self.player.hp}/{self.player.max_hp}', True, WHITE)
+        self.screen.blit(hp_text, (panel_rect.x + 20, y + 1))
+        y += 28
         
         mp_ratio = self.player.mp / self.player.max_mp
-        pygame.draw.rect(self.screen, (0, 0, 100), (panel_rect.x + 10, y, 220, 20))
-        pygame.draw.rect(self.screen, BLUE, (panel_rect.x + 10, y, int(220 * mp_ratio), 20))
-        text = FONT_SMALL.render(f'MP: {self.player.mp}/{self.player.max_mp}', True, WHITE)
-        self.screen.blit(text, (panel_rect.x + 15, y + 2))
-        y += 30
+        pygame.draw.rect(self.screen, (0, 0, 80), (panel_rect.x + 15, y, 220, 18))
+        pygame.draw.rect(self.screen, (50, 100, 220), (panel_rect.x + 15, y, int(220 * mp_ratio), 18))
+        pygame.draw.rect(self.screen, (100, 150, 255), (panel_rect.x + 15, y, int(220 * mp_ratio), 6))
+        mp_text = FONT_SMALL.render(f'魔力值: {self.player.mp}/{self.player.max_mp}', True, WHITE)
+        self.screen.blit(mp_text, (panel_rect.x + 20, y + 1))
+        y += 28
         
         exp_ratio = self.player.exp / self.player.exp_to_next
-        pygame.draw.rect(self.screen, (50, 50, 0), (panel_rect.x + 10, y, 220, 15))
-        pygame.draw.rect(self.screen, YELLOW, (panel_rect.x + 10, y, int(220 * exp_ratio), 15))
-        y += 25
+        pygame.draw.rect(self.screen, (40, 40, 0), (panel_rect.x + 15, y, 220, 12))
+        pygame.draw.rect(self.screen, (200, 200, 0), (panel_rect.x + 15, y, int(220 * exp_ratio), 12))
+        y += 20
         
-        text = FONT_SMALL.render(f'金币: {self.player.gold}  层数: {self.floor}', True, GOLD)
-        self.screen.blit(text, (panel_rect.x + 10, y))
+        gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
+        floor_text = FONT_NORMAL.render(f'第 {self.floor} 层', True, WHITE)
+        self.screen.blit(gold_text, (panel_rect.x + 15, y))
+        self.screen.blit(floor_text, (panel_rect.x + 130, y))
         
-        log_rect = pygame.Rect(10, SCREEN_HEIGHT - 120, SCREEN_WIDTH - 270, 110)
-        pygame.draw.rect(self.screen, (40, 40, 40), log_rect)
-        pygame.draw.rect(self.screen, (100, 100, 100), log_rect, 2)
+        stats_text = [
+            f'力量: {self.player.get_total_str()}',
+            f'敏捷: {self.player.get_total_dex()}',
+            f'智力: {self.player.get_total_int()}',
+            f'防御: {self.player.get_total_defense()}'
+        ]
+        y += 30
+        for text in stats_text:
+            stat_text = FONT_SMALL.render(text, True, (200, 200, 200))
+            self.screen.blit(stat_text, (panel_rect.x + 15, y))
+            y += 18
         
-        y = log_rect.y + 10
-        for msg in self.message_log[-5:]:
-            text = FONT_SMALL.render(msg, True, WHITE)
-            self.screen.blit(text, (log_rect.x + 10, y))
-            y += 20
+        log_rect = pygame.Rect(10, SCREEN_HEIGHT - 130, SCREEN_WIDTH - 280, 120)
+        pygame.draw.rect(self.screen, (25, 25, 35), log_rect)
+        pygame.draw.rect(self.screen, (60, 60, 80), log_rect, 2)
         
-        help_text = '方向键移动 | 空格攻击 | I背包 | ESC暂停'
-        text = FONT_SMALL.render(help_text, True, GRAY)
-        self.screen.blit(text, (10, 10))
+        log_title = FONT_NORMAL.render('战斗日志', True, GRAY)
+        self.screen.blit(log_title, (log_rect.x + 10, log_rect.y + 5))
+        
+        y = log_rect.y + 30
+        for msg in self.message_log[-4:]:
+            msg_text = FONT_SMALL.render(msg, True, (220, 220, 220))
+            self.screen.blit(msg_text, (log_rect.x + 15, y))
+            y += 22
+        
+        help_bg = pygame.Rect(10, 10, 300, 50)
+        pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
+        pygame.draw.rect(self.screen, (60, 60, 80), help_bg, 2)
+        
+        help_lines = [
+            '方向键/WASD:移动 | 空格:攻击 | I:背包 | ESC:暂停'
+        ]
+        y = help_bg.y + 8
+        for line in help_lines:
+            help_text = FONT_SMALL.render(line, True, GRAY)
+            self.screen.blit(help_text, (help_bg.x + 10, y))
+            y += 16
+        
+        minimap_size = 150
+        minimap_rect = pygame.Rect(SCREEN_WIDTH - minimap_size - 10, 220, minimap_size, minimap_size)
+        pygame.draw.rect(self.screen, (15, 15, 25), minimap_rect)
+        pygame.draw.rect(self.screen, (60, 60, 80), minimap_rect, 2)
+        
+        scale = minimap_size / MAP_WIDTH
+        for x in range(MAP_WIDTH):
+            for y in range(MAP_HEIGHT):
+                if self.game_map.explored[x][y]:
+                    if self.game_map.tiles[x][y] == 0:
+                        color = (80, 60, 40) if not self.game_map.visible[x][y] else (120, 100, 70)
+                    else:
+                        color = (40, 40, 50)
+                    px = int(minimap_rect.x + x * scale)
+                    py = int(minimap_rect.y + y * scale)
+                    pygame.draw.rect(self.screen, color, (px, py, max(1, int(scale)), max(1, int(scale))))
+        
+        for monster in self.monsters:
+            if self.game_map.visible[monster.x][monster.y]:
+                px = int(minimap_rect.x + monster.x * scale)
+                py = int(minimap_rect.y + monster.y * scale)
+                pygame.draw.circle(self.screen, RED, (px, py), 2)
+        
+        if self.game_map.stairs_pos:
+            sx, sy = self.game_map.stairs_pos
+            if self.game_map.explored[sx][sy]:
+                px = int(minimap_rect.x + sx * scale)
+                py = int(minimap_rect.y + sy * scale)
+                pygame.draw.circle(self.screen, YELLOW, (px, py), 3)
+        
+        px = int(minimap_rect.x + self.player.x * scale)
+        py = int(minimap_rect.y + self.player.y * scale)
+        pygame.draw.circle(self.screen, CYAN, (px, py), 4)
+        pygame.draw.circle(self.screen, WHITE, (px, py), 2)
     
     def render_menu(self):
+        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 80, 600, 120)
+        pygame.draw.rect(self.screen, (40, 40, 60), title_bg)
+        pygame.draw.rect(self.screen, GOLD, title_bg, 3)
+        
         title = FONT_TITLE.render('地牢探险', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 150))
+        subtitle = FONT_LARGE.render('Roguelike', True, (180, 180, 200))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 130))
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 175))
+        self.screen.blit(title, title_rect)
+        self.screen.blit(subtitle, subtitle_rect)
         
-        menu_items = ['开始游戏', '继续游戏', '排行榜', '退出']
+        menu_items = ['开始游戏', '继续游戏', '排行榜', '退出游戏']
         for i, item in enumerate(menu_items):
-            color = YELLOW if i == self.menu_selection else WHITE
+            y = 280 + i * 70
+            item_rect = pygame.Rect(SCREEN_WIDTH // 2 - 200, y, 400, 55)
+            
+            if i == self.menu_selection:
+                pygame.draw.rect(self.screen, (60, 70, 90), item_rect)
+                pygame.draw.rect(self.screen, GOLD, item_rect, 3)
+                color = YELLOW
+            else:
+                pygame.draw.rect(self.screen, (35, 35, 50), item_rect)
+                pygame.draw.rect(self.screen, (70, 70, 90), item_rect, 2)
+                color = WHITE
+            
             text = FONT_LARGE.render(item, True, color)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 300 + i * 60))
+            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, y + 28))
+            self.screen.blit(text, text_rect)
         
-        pygame.display.flip()
+        footer_text = FONT_SMALL.render('使用方向键选择，按回车确认', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        self.screen.blit(footer_text, footer_rect)
     
     def render_class_select(self):
-        title = FONT_LARGE.render('选择你的职业', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 100))
+        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 40, 600, 80)
+        pygame.draw.rect(self.screen, (40, 40, 60), title_bg)
+        pygame.draw.rect(self.screen, GOLD, title_bg, 3)
         
-        class_names = list(CLASSES.keys())
-        for i, class_key in enumerate(class_names):
-            class_data = CLASSES[class_key]
-            color = YELLOW if i == self.menu_selection else WHITE
+        title = FONT_LARGE.render('选择你的职业', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
+        self.screen.blit(title, title_rect)
+        
+        class_data = [
+            ('warrior', '战士', '血厚防高，近战强力', RED, ['HP: 150', 'MP: 30', '力量: 18', '防御: 15']),
+            ('mage', '法师', '远程魔法，伤害爆炸', BLUE, ['HP: 80', 'MP: 120', '智力: 20', '魔法伤害高']),
+            ('rogue', '盗贼', '敏捷灵活，背刺暴击', GREEN, ['HP: 100', 'MP: 50', '敏捷: 20', '闪避率高'])
+        ]
+        
+        for i, (key, name, desc, color, stats) in enumerate(class_data):
+            x = 80 + i * 350
+            panel_rect = pygame.Rect(x, 150, 300, 420)
             
-            x = 200 + i * 300
-            pygame.draw.rect(self.screen, (50, 50, 50), (x - 50, 180, 250, 350))
-            pygame.draw.rect(self.screen, color, (x - 50, 180, 250, 350), 3)
+            if i == self.menu_selection:
+                bg_color = (50, 50, 70)
+                border_color = GOLD
+            else:
+                bg_color = (30, 30, 45)
+                border_color = (70, 70, 90)
             
-            text = FONT_LARGE.render(class_data['name'], True, color)
-            self.screen.blit(text, (x, 200))
+            pygame.draw.rect(self.screen, bg_color, panel_rect)
+            pygame.draw.rect(self.screen, border_color, panel_rect, 3)
             
-            y = 270
-            stats = [
-                f'生命: {class_data["hp"]}',
-                f'魔力: {class_data["mp"]}',
-                f'力量: {class_data["str"]}',
-                f'敏捷: {class_data["dex"]}',
-                f'智力: {class_data["int"]}',
-                f'防御: {class_data["def"]}'
-            ]
+            class_title = FONT_LARGE.render(name, True, color)
+            self.screen.blit(class_title, (x + 30, 170))
+            
+            pygame.draw.circle(self.screen, color, (x + 150, 260), 40)
+            pygame.draw.circle(self.screen, WHITE, (x + 150, 260), 40, 3)
+            pygame.draw.circle(self.screen, WHITE, (x + 135, 250), 8)
+            pygame.draw.circle(self.screen, WHITE, (x + 165, 250), 8)
+            pygame.draw.circle(self.screen, BLACK, (x + 135, 250), 4)
+            pygame.draw.circle(self.screen, BLACK, (x + 165, 250), 4)
+            
+            y = 320
             for stat in stats:
-                text = FONT_NORMAL.render(stat, True, WHITE)
-                self.screen.blit(text, (x, y))
+                stat_text = FONT_NORMAL.render(stat, True, WHITE)
+                self.screen.blit(stat_text, (x + 30, y))
                 y += 30
             
-            text = FONT_SMALL.render(class_data['description'], True, GRAY)
-            self.screen.blit(text, (x, y + 20))
+            desc_text = FONT_SMALL.render(desc, True, GRAY)
+            self.screen.blit(desc_text, (x + 30, y + 20))
         
-        text = FONT_NORMAL.render('按回车确认', True, GRAY)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 580))
+        footer_text = FONT_NORMAL.render('按 ← → 选择职业，按回车键开始游戏', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        self.screen.blit(footer_text, footer_rect)
     
     def render_pause_menu(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
+        
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 250, SCREEN_HEIGHT // 2 - 180, 500, 360)
+        pygame.draw.rect(self.screen, (35, 35, 50), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
+        title = FONT_LARGE.render('游戏暂停', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 140))
+        self.screen.blit(title, title_rect)
         
         menu_items = ['继续游戏', '保存游戏', '返回主菜单']
         for i, item in enumerate(menu_items):
-            color = YELLOW if i == self.menu_selection else WHITE
+            y = SCREEN_HEIGHT // 2 - 60 + i * 70
+            item_rect = pygame.Rect(SCREEN_WIDTH // 2 - 180, y, 360, 50)
+            
+            if i == self.menu_selection:
+                pygame.draw.rect(self.screen, (60, 70, 90), item_rect)
+                pygame.draw.rect(self.screen, GOLD, item_rect, 2)
+                color = YELLOW
+            else:
+                pygame.draw.rect(self.screen, (50, 50, 70), item_rect)
+                color = WHITE
+            
             text = FONT_LARGE.render(item, True, color)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 250 + i * 60))
+            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, y + 25))
+            self.screen.blit(text, text_rect)
     
     def render_inventory(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, (0, 0))
         
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 80, 800, 560)
+        pygame.draw.rect(self.screen, (30, 30, 45), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
         title = FONT_LARGE.render('背包', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 50))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 110))
+        self.screen.blit(title, title_rect)
         
-        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 300, 100, 600, 500)
-        pygame.draw.rect(self.screen, (40, 40, 40), panel_rect)
-        pygame.draw.rect(self.screen, (100, 100, 100), panel_rect, 2)
+        gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
+        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 300, 110))
         
-        y = 120
+        items_rect = pygame.Rect(panel_rect.x + 20, 150, 450, 400)
+        pygame.draw.rect(self.screen, (25, 25, 35), items_rect)
+        pygame.draw.rect(self.screen, (60, 60, 80), items_rect, 2)
+        
+        y = 160
         for i, item in enumerate(self.player.inventory[:15]):
-            color = YELLOW if i == self.inventory_selection else WHITE
-            text = FONT_NORMAL.render(f'{i + 1}. {item.name}', True, color)
-            self.screen.blit(text, (panel_rect.x + 20, y))
-            y += 30
+            if i == self.inventory_selection:
+                bg_color = (60, 70, 90)
+                text_color = YELLOW
+            else:
+                bg_color = (35, 35, 50)
+                text_color = WHITE
+            
+            item_bg = pygame.Rect(items_rect.x + 10, y, 430, 25)
+            pygame.draw.rect(self.screen, bg_color, item_bg)
+            
+            item_text = FONT_NORMAL.render(f'{i + 1}. {item.name}', True, text_color)
+            self.screen.blit(item_text, (items_rect.x + 20, y + 2))
+            y += 26
         
         if self.player.inventory:
-            selected = self.player.inventory[self.inventory_selection]
-            text = FONT_SMALL.render(f'价值: {selected.value} 金币', True, GRAY)
-            self.screen.blit(text, (panel_rect.x + 300, 120))
+            detail_rect = pygame.Rect(panel_rect.x + 490, 150, 290, 400)
+            pygame.draw.rect(self.screen, (25, 25, 35), detail_rect)
+            pygame.draw.rect(self.screen, (60, 60, 80), detail_rect, 2)
             
-            if hasattr(selected, 'stats'):
-                y = 160
-                for stat, value in selected.stats.items():
-                    text = FONT_SMALL.render(f'{stat}: +{value}', True, GREEN)
-                    self.screen.blit(text, (panel_rect.x + 300, y))
-                    y += 25
+            selected = self.player.inventory[self.inventory_selection]
+            
+            name_text = FONT_NORMAL.render(selected.name, True, GOLD)
+            self.screen.blit(name_text, (detail_rect.x + 15, 165))
+            
+            y = 200
+            if hasattr(selected, 'slot'):
+                slot_names = {
+                    'weapon': '武器',
+                    'armor': '盔甲',
+                    'helmet': '头盔',
+                    'boots': '靴子',
+                    'accessory': '饰品'
+                }
+                type_text = FONT_SMALL.render(f'类型: {slot_names.get(selected.slot, "其他")}', True, WHITE)
+                self.screen.blit(type_text, (detail_rect.x + 15, y))
+                y += 25
+                
+                if hasattr(selected, 'stats'):
+                    for stat, value in selected.stats.items():
+                        stat_names = {
+                            'damage': '伤害',
+                            'defense': '防御',
+                            'hp': '生命',
+                            'mp': '魔力',
+                            'str': '力量',
+                            'dex': '敏捷',
+                            'int': '智力'
+                        }
+                        stat_name = stat_names.get(stat, stat)
+                        stat_text = FONT_SMALL.render(f'{stat_name}: +{value}', True, GREEN)
+                        self.screen.blit(stat_text, (detail_rect.x + 15, y))
+                        y += 22
+            
+            value_text = FONT_SMALL.render(f'价值: {selected.value} 金币', True, GRAY)
+            self.screen.blit(value_text, (detail_rect.x + 15, y + 10))
         
-        equip_text = FONT_SMALL.render('E-装备  U-使用  D-卸下', True, GRAY)
-        self.screen.blit(equip_text, (panel_rect.x + 20, panel_rect.y + panel_rect.height - 40))
+        help_bg = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 760, 45)
+        pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
+        
+        help_lines = [
+            '↑↓: 选择物品 | E: 装备 | U: 使用 | ESC: 关闭背包'
+        ]
+        y = help_bg.y + 8
+        for line in help_lines:
+            help_text = FONT_NORMAL.render(line, True, GRAY)
+            self.screen.blit(help_text, (help_bg.x + 20, y))
+            y += 18
     
     def render_shop(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
+        overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, (0, 0))
         
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 450, 60, 900, 620)
+        pygame.draw.rect(self.screen, (30, 30, 45), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
         title = FONT_LARGE.render('商店', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 50))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 95))
+        self.screen.blit(title, title_rect)
         
-        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 100, 800, 500)
-        pygame.draw.rect(self.screen, (40, 40, 40), panel_rect)
-        pygame.draw.rect(self.screen, (100, 100, 100), panel_rect, 2)
+        gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
+        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 350, 95))
         
-        gold_text = FONT_NORMAL.render(f'金币: {self.player.gold}', True, GOLD)
-        self.screen.blit(gold_text, (panel_rect.x + 20, panel_rect.y + 20))
+        mode_rect = pygame.Rect(SCREEN_WIDTH // 2 - 120, 95, 240, 35)
+        if self.shop_mode == 'buy':
+            pygame.draw.rect(self.screen, (40, 70, 100), mode_rect)
+            mode_text = FONT_NORMAL.render('购买模式', True, CYAN)
+        else:
+            pygame.draw.rect(self.screen, (70, 70, 40), mode_rect)
+            mode_text = FONT_NORMAL.render('出售模式', True, YELLOW)
+        mode_rect_text = mode_text.get_rect(center=(SCREEN_WIDTH // 2, 112))
+        self.screen.blit(mode_text, mode_rect_text)
         
-        mode_text = '购买' if self.shop_mode == 'buy' else '出售'
-        text = FONT_NORMAL.render(f'模式: {mode_text}', True, YELLOW)
-        self.screen.blit(text, (panel_rect.x + 600, panel_rect.y + 20))
+        items_rect = pygame.Rect(panel_rect.x + 20, 150, 860, 420)
+        pygame.draw.rect(self.screen, (25, 25, 35), items_rect)
+        pygame.draw.rect(self.screen, (60, 60, 80), items_rect, 2)
         
         items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
         
         y = 160
-        for i, item in enumerate(items[:12]):
-            color = YELLOW if i == self.shop_selection else WHITE
-            price = item.value if self.shop_mode == 'buy' else item.value // 2
-            text = FONT_NORMAL.render(f'{i + 1}. {item.name} - {price}G', True, color)
-            self.screen.blit(text, (panel_rect.x + 20, y))
+        for i, item in enumerate(items[:14]):
+            if i == self.shop_selection:
+                bg_color = (60, 70, 90)
+                text_color = YELLOW
+            else:
+                bg_color = (35, 35, 50)
+                text_color = WHITE
+            
+            item_bg = pygame.Rect(items_rect.x + 10, y, 840, 28)
+            pygame.draw.rect(self.screen, bg_color, item_bg)
+            
+            price = item.value if self.shop_mode == 'buy' else max(1, item.value // 2)
+            item_text = FONT_NORMAL.render(f'{i + 1}. {item.name} - {price} 金币', True, text_color)
+            self.screen.blit(item_text, (items_rect.x + 20, y + 3))
             y += 30
         
-        help_text = 'TAB-切换模式  回车-交易  ESC-离开商店'
-        text = FONT_SMALL.render(help_text, True, GRAY)
-        self.screen.blit(text, (panel_rect.x + 20, panel_rect.y + panel_rect.height - 40))
+        help_bg = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 860, 45)
+        pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
+        
+        help_lines = [
+            '↑↓: 选择 | TAB: 切换买/卖 | 回车: 确认交易 | ESC: 离开商店'
+        ]
+        y = help_bg.y + 8
+        for line in help_lines:
+            help_text = FONT_NORMAL.render(line, True, GRAY)
+            self.screen.blit(help_text, (help_bg.x + 20, y))
+            y += 18
     
     def render_game_over(self):
-        self.screen.fill(BLACK)
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((50, 0, 0, 200))
+        self.screen.blit(overlay, (0, 0))
+        
         title = FONT_TITLE.render('游戏结束', True, RED)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 200))
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 200))
+        self.screen.blit(title, title_rect)
         
-        text = FONT_LARGE.render(f'到达层数: {self.floor}', True, WHITE)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 300))
+        stats = [
+            f'到达层数: 第 {self.floor} 层',
+            f'最终等级: Lv.{self.player.level}',
+            f'获得金币: {self.player.gold}',
+            f'击败怪物数: {self.turn}'
+        ]
         
-        text = FONT_LARGE.render(f'最终等级: {self.player.level}', True, WHITE)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 360))
+        y = 300
+        for stat in stats:
+            stat_text = FONT_LARGE.render(stat, True, WHITE)
+            stat_rect = stat_text.get_rect(center=(SCREEN_WIDTH // 2, y))
+            self.screen.blit(stat_text, stat_rect)
+            y += 50
         
-        text = FONT_NORMAL.render('按任意键返回主菜单', True, GRAY)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 500))
+        footer_text = FONT_NORMAL.render('按任意键返回主菜单', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80))
+        self.screen.blit(footer_text, footer_rect)
     
     def render_victory(self):
-        self.screen.fill((20, 40, 20))
-        title = FONT_TITLE.render('胜利！', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 200))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((20, 50, 20, 200))
+        self.screen.blit(overlay, (0, 0))
         
-        text = FONT_LARGE.render('恭喜你击败了远古巨龙！', True, WHITE)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 300))
+        for _ in range(20):
+            x = random.randint(0, SCREEN_WIDTH)
+            y = random.randint(0, SCREEN_HEIGHT)
+            pygame.draw.circle(self.screen, GOLD, (x, y), random.randint(3, 8))
         
-        text = FONT_LARGE.render(f'最终等级: {self.player.level}', True, WHITE)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 360))
+        title = FONT_TITLE.render('🎉 胜利！🎉', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 180))
+        self.screen.blit(title, title_rect)
         
-        text = FONT_NORMAL.render('按任意键返回主菜单', True, GRAY)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 500))
+        subtitle = FONT_LARGE.render('恭喜你击败了远古巨龙！', True, WHITE)
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(subtitle, subtitle_rect)
+        
+        stats = [
+            f'通关层数: {self.floor} 层',
+            f'最终等级: Lv.{self.player.level}',
+            f'剩余生命: {self.player.hp}/{self.player.max_hp}',
+            f'获得金币: {self.player.gold}'
+        ]
+        
+        y = 320
+        for stat in stats:
+            stat_text = FONT_LARGE.render(stat, True, WHITE)
+            stat_rect = stat_text.get_rect(center=(SCREEN_WIDTH // 2, y))
+            self.screen.blit(stat_text, stat_rect)
+            y += 50
+        
+        footer_text = FONT_NORMAL.render('按任意键返回主菜单', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 80))
+        self.screen.blit(footer_text, footer_rect)
     
     def render_leaderboard(self):
-        self.screen.fill(BLACK)
-        title = FONT_TITLE.render('排行榜', True, GOLD)
-        self.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 80))
+        self.screen.fill((15, 15, 25))
+        
+        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 50, 600, 80)
+        pygame.draw.rect(self.screen, (40, 40, 60), title_bg)
+        pygame.draw.rect(self.screen, GOLD, title_bg, 3)
+        
+        title = FONT_TITLE.render('🏆 排行榜 🏆', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 90))
+        self.screen.blit(title, title_rect)
+        
+        board_rect = pygame.Rect(SCREEN_WIDTH // 2 - 350, 160, 700, 450)
+        pygame.draw.rect(self.screen, (25, 25, 40), board_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), board_rect, 2)
         
         leaderboard = self.save_manager.get_leaderboard()
         
-        for i, entry in enumerate(leaderboard):
-            text = FONT_LARGE.render(f'{i + 1}. {entry["name"]} - {entry["score"]}分 - 第{entry["floor"]}层', True, WHITE)
-            self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 180 + i * 45))
+        if not leaderboard:
+            empty_text = FONT_LARGE.render('暂无记录，快去创造历史吧！', True, GRAY)
+            empty_rect = empty_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            self.screen.blit(empty_text, empty_rect)
+        else:
+            header_text = FONT_LARGE.render('排名    玩家        分数        层数', True, GOLD)
+            self.screen.blit(header_text, (board_rect.x + 40, 180))
+            
+            pygame.draw.line(self.screen, (80, 80, 100), (board_rect.x + 30, 220), (board_rect.x + board_rect.width - 30, 220), 2)
+            
+            y = 240
+            for i, entry in enumerate(leaderboard[:10]):
+                if i < 3:
+                    medal_colors = [GOLD, (192, 192, 192), (205, 127, 50)]
+                    color = medal_colors[i]
+                    medal = f'🥇🥈🥉'[i] if i < 3 else f'  {i + 1}.'
+                else:
+                    color = WHITE
+                    medal = f'  {i + 1}.'
+                
+                entry_text = FONT_LARGE.render(f'{medal}    {entry["name"]:8}  {entry["score"]:6}    第{entry["floor"]}层', True, color)
+                self.screen.blit(entry_text, (board_rect.x + 40, y))
+                y += 38
         
-        text = FONT_NORMAL.render('按任意键返回', True, GRAY)
-        self.screen.blit(text, (SCREEN_WIDTH // 2 - text.get_width() // 2, 600))
+        footer_text = FONT_NORMAL.render('按任意键返回主菜单', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        self.screen.blit(footer_text, footer_rect)
     
     def game_over(self):
         self.state = GameState.GAME_OVER
@@ -546,25 +926,30 @@ class Game:
                     self.state = GameState.MENU
     
     def handle_menu_input(self, event):
-        if event.key == pygame.K_UP:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             self.menu_selection = (self.menu_selection - 1) % 4
-        elif event.key == pygame.K_DOWN:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             self.menu_selection = (self.menu_selection + 1) % 4
         elif event.key == pygame.K_RETURN:
             if self.menu_selection == 0:
                 self.state = GameState.CLASS_SELECT
                 self.menu_selection = 0
             elif self.menu_selection == 1:
-                pass
+                if self.save_manager.has_save():
+                    pass
+                else:
+                    self.add_message('没有找到存档！')
             elif self.menu_selection == 2:
                 self.state = GameState.LEADERBOARD
             elif self.menu_selection == 3:
                 self.running = False
+        elif event.key == pygame.K_ESCAPE:
+            self.running = False
     
     def handle_class_select_input(self, event):
-        if event.key == pygame.K_LEFT:
+        if event.key in [pygame.K_LEFT, pygame.K_a]:
             self.menu_selection = (self.menu_selection - 1) % 3
-        elif event.key == pygame.K_RIGHT:
+        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
             self.menu_selection = (self.menu_selection + 1) % 3
         elif event.key == pygame.K_RETURN:
             classes = list(CLASSES.keys())
@@ -597,9 +982,9 @@ class Game:
             self.menu_selection = 0
     
     def handle_pause_input(self, event):
-        if event.key == pygame.K_UP:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             self.menu_selection = (self.menu_selection - 1) % 3
-        elif event.key == pygame.K_DOWN:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             self.menu_selection = (self.menu_selection + 1) % 3
         elif event.key == pygame.K_RETURN:
             if self.menu_selection == 0:
@@ -620,18 +1005,20 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_inventory_input(self, event):
-        if event.key == pygame.K_UP:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             if self.inventory_selection > 0:
                 self.inventory_selection -= 1
-        elif event.key == pygame.K_DOWN:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             if self.inventory_selection < len(self.player.inventory) - 1:
                 self.inventory_selection += 1
         elif event.key == pygame.K_e:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'slot'):
-                    self.player.equip_item(item)
-                    self.add_message(f'装备了 {item.name}！')
+                    if self.player.equip_item(item):
+                        self.add_message(f'装备了 {item.name}！')
+                    else:
+                        self.add_message(f'无法装备 {item.name}！')
         elif event.key == pygame.K_u:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
@@ -639,15 +1026,17 @@ class Game:
                     msg = item.use(self.player)
                     self.add_message(msg)
                     self.player.remove_item(item)
+                else:
+                    self.add_message('这个物品无法使用！')
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
     
     def handle_shop_input(self, event):
         items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
-        if event.key == pygame.K_UP:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             if self.shop_selection > 0:
                 self.shop_selection -= 1
-        elif event.key == pygame.K_DOWN:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             if self.shop_selection < len(items) - 1:
                 self.shop_selection += 1
         elif event.key == pygame.K_TAB:
@@ -657,11 +1046,20 @@ class Game:
             if items:
                 item = items[self.shop_selection]
                 if self.shop_mode == 'buy':
-                    success, msg = self.shop.buy(self.player, item)
-                    self.add_message(msg)
+                    if self.player.gold >= item.value:
+                        if self.player.add_item(item):
+                            self.player.gold -= item.value
+                            self.shop.inventory.remove(item)
+                            self.add_message(f'购买了 {item.name}！')
+                        else:
+                            self.add_message('背包已满！')
+                    else:
+                        self.add_message('金币不足！')
                 else:
-                    success, msg = self.shop.sell(self.player, item)
-                    self.add_message(msg)
+                    sell_price = max(1, item.value // 2)
+                    self.player.gold += sell_price
+                    self.player.remove_item(item)
+                    self.add_message(f'出售了 {item.name}，获得 {sell_price} 金币！')
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
     
