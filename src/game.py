@@ -722,7 +722,7 @@ class Game:
             self.screen.blit(item_text, (items_rect.x + 20, y + 2))
             y += 26
         
-        if self.player.inventory:
+        if self.player.inventory and 0 <= self.inventory_selection < len(self.player.inventory):
             detail_rect = pygame.Rect(panel_rect.x + 490, 150, 290, 400)
             pygame.draw.rect(self.screen, (25, 25, 35), detail_rect)
             pygame.draw.rect(self.screen, (60, 60, 80), detail_rect, 2)
@@ -1299,6 +1299,14 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_inventory_input(self, event):
+        if not self.player.inventory:
+            self.inventory_selection = 0
+            if event.key == pygame.K_ESCAPE:
+                self.state = GameState.PLAYING
+            return
+        
+        self.inventory_selection = max(0, min(self.inventory_selection, len(self.player.inventory) - 1))
+        
         if event.key in [pygame.K_UP, pygame.K_w]:
             if self.inventory_selection > 0:
                 self.inventory_selection -= 1
@@ -1306,20 +1314,23 @@ class Game:
             if self.inventory_selection < len(self.player.inventory) - 1:
                 self.inventory_selection += 1
         elif event.key in [pygame.K_e]:
-            if self.player.inventory:
+            if 0 <= self.inventory_selection < len(self.player.inventory):
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'slot'):
                     if self.player.equip_item(item):
                         self.add_message(f'装备了 {item.name}！')
                     else:
                         self.add_message(f'无法装备 {item.name}！')
+                else:
+                    self.add_message('这个物品无法装备！')
         elif event.key in [pygame.K_u]:
-            if self.player.inventory:
+            if 0 <= self.inventory_selection < len(self.player.inventory):
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'use'):
                     msg = item.use(self.player)
                     self.add_message(msg)
                     self.player.remove_item(item)
+                    self.inventory_selection = min(self.inventory_selection, len(self.player.inventory) - 1)
                 else:
                     self.add_message('这个物品无法使用！')
         elif event.key == pygame.K_ESCAPE:
@@ -1327,6 +1338,18 @@ class Game:
     
     def handle_shop_input(self, event):
         items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
+        
+        if not items:
+            self.shop_selection = 0
+            if event.key == pygame.K_TAB:
+                self.shop_mode = 'sell' if self.shop_mode == 'buy' else 'buy'
+                self.shop_selection = 0
+            elif event.key == pygame.K_ESCAPE:
+                self.state = GameState.PLAYING
+            return
+        
+        self.shop_selection = max(0, min(self.shop_selection, len(items) - 1))
+        
         if event.key in [pygame.K_UP, pygame.K_w]:
             if self.shop_selection > 0:
                 self.shop_selection -= 1
@@ -1337,13 +1360,14 @@ class Game:
             self.shop_mode = 'sell' if self.shop_mode == 'buy' else 'buy'
             self.shop_selection = 0
         elif event.key == pygame.K_RETURN:
-            if items:
+            if items and 0 <= self.shop_selection < len(items):
                 item = items[self.shop_selection]
                 if self.shop_mode == 'buy':
                     if self.player.gold >= item.value:
                         if self.player.add_item(item):
                             self.player.gold -= item.value
                             self.shop.inventory.remove(item)
+                            self.shop_selection = min(self.shop_selection, len(self.shop.inventory) - 1)
                             self.add_message(f'购买了 {item.name}！')
                         else:
                             self.add_message('背包已满！')
@@ -1353,6 +1377,7 @@ class Game:
                     sell_price = max(1, item.value // 2)
                     self.player.gold += sell_price
                     self.player.remove_item(item)
+                    self.shop_selection = min(self.shop_selection, len(self.player.inventory) - 1)
                     self.add_message(f'出售了 {item.name}，获得 {sell_price} 金币！')
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
