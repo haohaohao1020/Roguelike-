@@ -60,7 +60,7 @@ class Character(Entity):
         self.exp = 0
         self.exp_to_next = 100
         self.gold = 50
-        self.skill_points = 0
+        self.skill_points = 1
         
         self.equipment = {slot: None for slot in EQUIPMENT_SLOTS}
         self.inventory = []
@@ -77,6 +77,27 @@ class Character(Entity):
         
         self.level_up_animation = 0
         self.is_leveling_up = False
+        
+        self.talents = {
+            'strength_1': False,
+            'strength_2': False,
+            'strength_3': False,
+            'dexterity_1': False,
+            'dexterity_2': False,
+            'dexterity_3': False,
+            'intelligence_1': False,
+            'intelligence_2': False,
+            'intelligence_3': False,
+            'defense_1': False,
+            'defense_2': False,
+            'defense_3': False,
+            'hp_1': False,
+            'hp_2': False,
+            'hp_3': False,
+            'mp_1': False,
+            'mp_2': False,
+            'mp_3': False
+        }
     
     def get_total_str(self):
         total = self.str
@@ -153,6 +174,85 @@ class Character(Entity):
         self.exp_to_next = int(self.exp_to_next * 1.5)
         self.is_leveling_up = True
         self.level_up_animation = 120
+    
+    def can_unlock_talent(self, talent_id):
+        talent_tiers = {
+            'strength_1': 1, 'strength_2': 3, 'strength_3': 5,
+            'dexterity_1': 1, 'dexterity_2': 3, 'dexterity_3': 5,
+            'intelligence_1': 1, 'intelligence_2': 3, 'intelligence_3': 5,
+            'defense_1': 1, 'defense_2': 3, 'defense_3': 5,
+            'hp_1': 1, 'hp_2': 3, 'hp_3': 5,
+            'mp_1': 1, 'mp_2': 3, 'mp_3': 5
+        }
+        prerequisites = {
+            'strength_2': 'strength_1',
+            'strength_3': 'strength_2',
+            'dexterity_2': 'dexterity_1',
+            'dexterity_3': 'dexterity_2',
+            'intelligence_2': 'intelligence_1',
+            'intelligence_3': 'intelligence_2',
+            'defense_2': 'defense_1',
+            'defense_3': 'defense_2',
+            'hp_2': 'hp_1',
+            'hp_3': 'hp_2',
+            'mp_2': 'mp_1',
+            'mp_3': 'mp_2'
+        }
+        
+        if self.talents.get(talent_id, False):
+            return False, '已学会'
+        
+        if self.skill_points <= 0:
+            return False, '点数不足'
+        
+        if self.level < talent_tiers.get(talent_id, 1):
+            return False, f'需要等级{talent_tiers.get(talent_id, 1)}'
+        
+        if talent_id in prerequisites and not self.talents.get(prerequisites[talent_id], False):
+            return False, '需要前置天赋'
+        
+        return True, '可以学习'
+    
+    def unlock_talent(self, talent_id):
+        can_unlock, message = self.can_unlock_talent(talent_id)
+        if not can_unlock:
+            return False, message
+        
+        talent_effects = {
+            'strength_1': ('str', 3),
+            'strength_2': ('str', 5),
+            'strength_3': ('str', 8),
+            'dexterity_1': ('dex', 3),
+            'dexterity_2': ('dex', 5),
+            'dexterity_3': ('dex', 8),
+            'intelligence_1': ('int', 3),
+            'intelligence_2': ('int', 5),
+            'intelligence_3': ('int', 8),
+            'defense_1': ('defense', 3),
+            'defense_2': ('defense', 5),
+            'defense_3': ('defense', 8),
+            'hp_1': ('max_hp', 30),
+            'hp_2': ('max_hp', 50),
+            'hp_3': ('max_hp', 80),
+            'mp_1': ('max_mp', 20),
+            'mp_2': ('max_mp', 35),
+            'mp_3': ('max_mp', 50)
+        }
+        
+        if talent_id in talent_effects:
+            stat, value = talent_effects[talent_id]
+            if stat == 'max_hp':
+                self.max_hp += value
+                self.hp = min(self.hp + value, self.max_hp)
+            elif stat == 'max_mp':
+                self.max_mp += value
+                self.mp = min(self.mp + value, self.max_mp)
+            else:
+                setattr(self, stat, getattr(self, stat) + value)
+        
+        self.talents[talent_id] = True
+        self.skill_points -= 1
+        return True, '学习成功'
     
     def equip_item(self, item):
         if item.slot in self.equipment:

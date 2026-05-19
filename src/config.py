@@ -5,12 +5,12 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS_DIR = os.path.join(BASE_DIR, 'assets')
 SAVES_DIR = os.path.join(BASE_DIR, 'saves')
 
-SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 720
+SCREEN_WIDTH = 1600
+SCREEN_HEIGHT = 900
 FPS = 60
 
-MAP_WIDTH = 50
-MAP_HEIGHT = 50
+MAP_WIDTH = 60
+MAP_HEIGHT = 60
 TILE_SIZE = 32
 
 MIN_ROOMS = 8
