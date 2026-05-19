@@ -66,10 +66,17 @@ class Character(Entity):
         self.inventory = []
         self.skills = []
         self.buffs = []
+        self.status_effects = []
         
         self.blocks_movement = True
         self.is_attacking = False
         self.attack_timer = 0
+        
+        self.base_attack_count = 1
+        self.extra_attacks = 0
+        
+        self.level_up_animation = 0
+        self.is_leveling_up = False
     
     def get_total_str(self):
         total = self.str
@@ -144,6 +151,8 @@ class Character(Entity):
         self.int += 1
         self.defense += 2
         self.exp_to_next = int(self.exp_to_next * 1.5)
+        self.is_leveling_up = True
+        self.level_up_animation = 120
     
     def equip_item(self, item):
         if item.slot in self.equipment:
@@ -185,3 +194,48 @@ class Character(Entity):
     def attack(self):
         self.is_attacking = True
         self.attack_timer = 15
+    
+    def add_status(self, status_type, duration, damage=0):
+        for status in self.status_effects:
+            if status['type'] == status_type:
+                status['duration'] = max(status['duration'], duration)
+                return
+        
+        self.status_effects.append({
+            'type': status_type,
+            'duration': duration,
+            'damage': damage
+        })
+    
+    def remove_status(self, status_type):
+        self.status_effects = [s for s in self.status_effects if s['type'] != status_type]
+    
+    def has_status(self, status_type):
+        return any(s['type'] == status_type for s in self.status_effects)
+    
+    def update_status_effects(self):
+        messages = []
+        for status in self.status_effects[:]:
+            if status['damage'] > 0:
+                self.hp -= status['damage']
+                messages.append(f'{status["type"]} 造成 {status["damage"]} 点伤害！')
+            
+            status['duration'] -= 1
+            if status['duration'] <= 0:
+                self.status_effects.remove(status)
+                messages.append(f'{status["type"]} 效果消失了！')
+        
+        return messages
+    
+    def get_total_attack_count(self):
+        count = self.base_attack_count + self.extra_attacks
+        if self.has_status('haste'):
+            count += 1
+        return count
+    
+    def apply_passive_effects(self):
+        if self.class_type == 'paladin':
+            self.defense += 2
+            if self.hp < self.max_hp * 0.3:
+                heal = int(self.max_hp * 0.02)
+                self.hp = min(self.max_hp, self.hp + heal)

@@ -152,12 +152,20 @@ class Game:
         if not self.player_turn:
             return
         
+        if self.player.has_status('stunned'):
+            self.add_message('你被眩晕了，无法移动！')
+            self.end_player_turn()
+            return
+        
         new_x = self.player.x + dx
         new_y = self.player.y + dy
         
         for monster in self.monsters:
             if monster.x == new_x and monster.y == new_y:
-                self.combat.attack(self.player, monster)
+                attack_count = self.player.get_total_attack_count()
+                for i in range(attack_count):
+                    if monster.is_alive():
+                        self.combat.attack(self.player, monster)
                 if not monster.is_alive():
                     self.monsters.remove(monster)
                 self.end_player_turn()
@@ -181,6 +189,12 @@ class Game:
         if 0 <= new_x < MAP_WIDTH and 0 <= new_y < MAP_HEIGHT:
             if self.game_map.tiles[new_x][new_y] == 0:
                 self.player.move(dx, dy)
+                self.game_map.add_to_path(self.player.x, self.player.y)
+                
+                affected, msg = self.game_map.apply_terrain_effect(self.player, self.player.x, self.player.y)
+                if affected and msg:
+                    self.add_message(msg)
+                
                 self.game_map.update_fov(self.player.x, self.player.y, 15)
                 self.update_camera()
         
@@ -197,6 +211,12 @@ class Game:
             self.player.heal(heal_amount)
             self.player.restore_mp(mp_amount)
             self.add_message(f'在休息点恢复了 {heal_amount} 生命和 {mp_amount} 魔力！')
+        elif current_room_type == 'altar' and self.last_room_type != 'altar':
+            self.add_message('你发现了一座神秘的祭坛！按 E 键献祭生命获得强化。')
+        elif current_room_type == 'blacksmith' and self.last_room_type != 'blacksmith':
+            self.add_message('你找到了铁匠铺！按 E 键强化装备。')
+        elif current_room_type == 'library' and self.last_room_type != 'library':
+            self.add_message('古老的图书馆！按 E 键阅读获得永久属性加成。')
         
         self.last_room_type = current_room_type
         
@@ -211,13 +231,28 @@ class Game:
         self.player_turn = False
         self.turn += 1
         
+        status_messages = self.player.update_status_effects()
+        for msg in status_messages:
+            self.add_message(msg)
+        
+        self.player.apply_passive_effects()
+        
         for monster in self.monsters:
             if monster.is_alive():
+                monster.update_status_effects()
                 monster.update_ai(self.game_map, self.player, self.monsters + [self.player])
                 
                 distance = monster.get_distance_to(self.player)
-                if distance <= 1.5:
-                    self.combat.attack(monster, self.player)
+                if distance <= 1.5 and monster.attack_cooldown <= 0:
+                    attack_count = 1 if random.random() < 0.7 else 2
+                    for _ in range(attack_count):
+                        if self.player.hp > 0:
+                            self.combat.attack(monster, self.player)
+                    monster.attack_cooldown = 2
+                elif monster.attack_cooldown > 0:
+                    monster.attack_cooldown -= 1
+                
+                self.game_map.apply_terrain_effect(monster, monster.x, monster.y)
         
         if self.player.hp <= 0:
             self.game_over()
@@ -232,6 +267,12 @@ class Game:
                 self.player.buffs.remove(buff)
         
         self.combat.update()
+        
+        if self.player.level_up_animation > 0:
+            self.player.level_up_animation -= 1
+            if self.player.level_up_animation <= 0:
+                self.player.is_leveling_up = False
+        
         self.player_turn = True
     
     def update_camera(self):
@@ -282,7 +323,8 @@ class Game:
                     if tile == 0:
                         room = self.game_map.get_room_at(x, y)
                         room_type = room.room_type if room else 'corridor'
-                        self.dungeon_renderer.draw_floor(self.screen, x, y, self.camera_x, self.camera_y, room_type, self.game_map.visible[x][y])
+                        terrain = self.game_map.terrain[x][y]
+                        self.dungeon_renderer.draw_floor(self.screen, x, y, self.camera_x, self.camera_y, room_type, terrain, self.game_map.visible[x][y])
                     else:
                         self.dungeon_renderer.draw_wall(self.screen, x, y, self.camera_x, self.camera_y, self.game_map.visible[x][y])
                 else:
@@ -328,6 +370,25 @@ class Game:
             self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
         elif class_name == '盗贼':
             self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        elif class_name == '圣骑士':
+            self.player_renderer.draw_paladin(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        
+        if self.player.is_leveling_up:
+            px = self.player.x * TILE_SIZE - int(self.camera_x) + TILE_SIZE // 2
+            py = self.player.y * TILE_SIZE - int(self.camera_y) + TILE_SIZE // 2
+            
+            progress = 1 - self.player.level_up_animation / 120
+            radius = int(20 + progress * 40)
+            alpha = int(255 * (1 - progress))
+            
+            level_surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(level_surf, (255, 215, 0, alpha), (radius, radius), radius, 3)
+            self.screen.blit(level_surf, (px - radius, py - radius))
+            
+            if self.player.level_up_animation > 60:
+                text = FONT_LARGE.render(f'LV.{self.player.level}!', True, GOLD)
+                text_rect = text.get_rect(center=(px, py - 30 - int((120 - self.player.level_up_animation) * 0.3)))
+                self.screen.blit(text, text_rect)
         
         self.render_ui()
     
@@ -383,6 +444,25 @@ class Game:
             self.screen.blit(stat_text, (panel_rect.x + 15, y))
             y += 18
         
+        if self.player.status_effects:
+            y += 5
+            status_title = FONT_SMALL.render('状态效果:', True, GOLD)
+            self.screen.blit(status_title, (panel_rect.x + 15, y))
+            y += 18
+            for status in self.player.status_effects[:3]:
+                status_color = {
+                    'poison': (100, 200, 100),
+                    'burning': (255, 100, 50),
+                    'frozen': (150, 200, 255),
+                    'stunned': (200, 200, 100),
+                    'haste': (255, 255, 100),
+                    'shield': (100, 150, 255),
+                    'invisible': (200, 200, 255)
+                }.get(status['type'], WHITE)
+                status_text = FONT_SMALL.render(f"  {status['type']} ({status['duration']})", True, status_color)
+                self.screen.blit(status_text, (panel_rect.x + 15, y))
+                y += 16
+        
         log_rect = pygame.Rect(10, SCREEN_HEIGHT - 130, SCREEN_WIDTH - 280, 120)
         pygame.draw.rect(self.screen, (25, 25, 35), log_rect)
         pygame.draw.rect(self.screen, (60, 60, 80), log_rect, 2)
@@ -415,9 +495,16 @@ class Game:
         pygame.draw.rect(self.screen, (60, 60, 80), minimap_rect, 2)
         
         scale = minimap_size / MAP_WIDTH
+        
+        for (x, y) in self.game_map.walked_path:
+            if self.game_map.explored[x][y]:
+                px = int(minimap_rect.x + x * scale)
+                py = int(minimap_rect.y + y * scale)
+                pygame.draw.rect(self.screen, (60, 50, 35), (px, py, max(1, int(scale)), max(1, int(scale))))
+        
         for x in range(MAP_WIDTH):
             for y in range(MAP_HEIGHT):
-                if self.game_map.explored[x][y]:
+                if self.game_map.explored[x][y] and (x, y) not in self.game_map.walked_path:
                     if self.game_map.tiles[x][y] == 0:
                         color = (80, 60, 40) if not self.game_map.visible[x][y] else (120, 100, 70)
                     else:
@@ -427,10 +514,23 @@ class Game:
                     pygame.draw.rect(self.screen, color, (px, py, max(1, int(scale)), max(1, int(scale))))
         
         for monster in self.monsters:
-            if self.game_map.visible[monster.x][monster.y]:
+            if self.game_map.explored[monster.x][monster.y]:
                 px = int(minimap_rect.x + monster.x * scale)
                 py = int(minimap_rect.y + monster.y * scale)
-                pygame.draw.circle(self.screen, RED, (px, py), 2)
+                color = RED if self.game_map.visible[monster.x][monster.y] else (100, 0, 0)
+                pygame.draw.circle(self.screen, color, (px, py), 2)
+        
+        for item in self.items:
+            if self.game_map.explored[item.x][item.y]:
+                px = int(minimap_rect.x + item.x * scale)
+                py = int(minimap_rect.y + item.y * scale)
+                if hasattr(item, 'is_open'):
+                    color = YELLOW
+                elif hasattr(item, 'amount'):
+                    color = (255, 215, 0)
+                else:
+                    color = (180, 180, 255)
+                pygame.draw.circle(self.screen, color, (px, py), 2)
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
@@ -443,6 +543,9 @@ class Game:
         py = int(minimap_rect.y + self.player.y * scale)
         pygame.draw.circle(self.screen, CYAN, (px, py), 4)
         pygame.draw.circle(self.screen, WHITE, (px, py), 2)
+        
+        floor_text = FONT_SMALL.render(f'第 {self.floor} 层', True, WHITE)
+        self.screen.blit(floor_text, (minimap_rect.x + 5, minimap_rect.y + minimap_size + 5))
     
     def render_menu(self):
         title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 80, 600, 120)
@@ -490,7 +593,8 @@ class Game:
         class_data = [
             ('warrior', '战士', '血厚防高，近战强力', RED, ['HP: 150', 'MP: 30', '力量: 18', '防御: 15']),
             ('mage', '法师', '远程魔法，伤害爆炸', BLUE, ['HP: 80', 'MP: 120', '智力: 20', '魔法伤害高']),
-            ('rogue', '盗贼', '敏捷灵活，背刺暴击', GREEN, ['HP: 100', 'MP: 50', '敏捷: 20', '闪避率高'])
+            ('rogue', '盗贼', '敏捷灵活，背刺暴击', GREEN, ['HP: 100', 'MP: 50', '敏捷: 20', '闪避率高']),
+            ('paladin', '圣骑士', '能奶能抗，神圣光环', (255, 215, 0), ['HP: 130', 'MP: 80', '防御: 18', '神圣光环'])
         ]
         
         for i, (key, name, desc, color, stats) in enumerate(class_data):
@@ -949,9 +1053,9 @@ class Game:
     
     def handle_class_select_input(self, event):
         if event.key in [pygame.K_LEFT, pygame.K_a]:
-            self.menu_selection = (self.menu_selection - 1) % 3
+            self.menu_selection = (self.menu_selection - 1) % 4
         elif event.key in [pygame.K_RIGHT, pygame.K_d]:
-            self.menu_selection = (self.menu_selection + 1) % 3
+            self.menu_selection = (self.menu_selection + 1) % 4
         elif event.key == pygame.K_RETURN:
             classes = list(CLASSES.keys())
             self.new_game(classes[self.menu_selection])
@@ -959,33 +1063,88 @@ class Game:
             self.state = GameState.MENU
     
     def handle_game_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             self.move_player(0, -1)
-        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             self.move_player(0, 1)
-        elif event.key in [pygame.K_LEFT, pygame.K_a, pygame.K_A]:
+        elif event.key in [pygame.K_LEFT, pygame.K_a]:
             self.move_player(-1, 0)
-        elif event.key in [pygame.K_RIGHT, pygame.K_d, pygame.K_D]:
+        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
             self.move_player(1, 0)
         elif event.key == pygame.K_SPACE:
             for monster in self.monsters:
                 if monster.get_distance_to(self.player) <= 1.5:
-                    self.combat.attack(self.player, monster)
+                    attack_count = self.player.get_total_attack_count()
+                    for _ in range(attack_count):
+                        if monster.is_alive():
+                            self.combat.attack(self.player, monster)
                     if not monster.is_alive():
                         self.monsters.remove(monster)
                     self.end_player_turn()
                     break
-        elif event.key in [pygame.K_i, pygame.K_I]:
+        elif event.key in [pygame.K_e, pygame.K_E]:
+            self.handle_special_room_interaction()
+        elif event.key in [pygame.K_i]:
             self.state = GameState.INVENTORY
             self.inventory_selection = 0
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PAUSED
             self.menu_selection = 0
     
+    def handle_special_room_interaction(self):
+        room = self.game_map.get_room_at(self.player.x, self.player.y)
+        if not room:
+            return
+        
+        room_type = room.room_type
+        
+        if room_type == 'altar':
+            if self.player.hp > 10:
+                sacrifice = int(self.player.max_hp * 0.2)
+                self.player.hp -= sacrifice
+                self.player.str += 3
+                self.player.defense += 2
+                self.add_message(f'献祭了{sacrifice}点生命，获得力量提升！')
+            else:
+                self.add_message('生命值不足，无法献祭！')
+        
+        elif room_type == 'blacksmith':
+            if self.player.gold >= 50:
+                self.player.gold -= 50
+                self.player.base_attack_count += 1
+                self.add_message('花费50金币，铁匠强化了你的攻击！')
+            else:
+                self.add_message('金币不足，无法强化！')
+        
+        elif room_type == 'library':
+            self.player.int += 5
+            self.player.max_mp += 20
+            self.player.mp = self.player.max_mp
+            self.add_message('阅读古老典籍，智力与魔力永久提升！')
+        
+        elif room_type == 'event':
+            event_roll = random.random()
+            if event_roll < 0.3:
+                heal_amount = int(self.player.max_hp * 0.5)
+                self.player.hp = min(self.player.max_hp, self.player.hp + heal_amount)
+                self.add_message(f'神秘泉水恢复了{heal_amount}点生命！')
+            elif event_roll < 0.6:
+                self.player.gold += random.randint(30, 80)
+                self.add_message('发现了一个藏宝箱，获得金币！')
+            elif event_roll < 0.8:
+                self.player.add_status('poison', 5, 3)
+                self.add_message('触发了古老诅咒，中毒了！')
+            else:
+                self.player.str += 2
+                self.player.dex += 2
+                self.add_message('获得了神秘的祝福！')
+        
+        self.end_player_turn()
+    
     def handle_pause_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             self.menu_selection = (self.menu_selection - 1) % 3
-        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             self.menu_selection = (self.menu_selection + 1) % 3
         elif event.key == pygame.K_RETURN:
             if self.menu_selection == 0:
@@ -1006,13 +1165,13 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_inventory_input(self, event):
-        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             if self.inventory_selection > 0:
                 self.inventory_selection -= 1
-        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             if self.inventory_selection < len(self.player.inventory) - 1:
                 self.inventory_selection += 1
-        elif event.key in [pygame.K_e, pygame.K_E]:
+        elif event.key in [pygame.K_e]:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'slot'):
@@ -1020,7 +1179,7 @@ class Game:
                         self.add_message(f'装备了 {item.name}！')
                     else:
                         self.add_message(f'无法装备 {item.name}！')
-        elif event.key in [pygame.K_u, pygame.K_U]:
+        elif event.key in [pygame.K_u]:
             if self.player.inventory:
                 item = self.player.inventory[self.inventory_selection]
                 if hasattr(item, 'use'):
@@ -1034,10 +1193,10 @@ class Game:
     
     def handle_shop_input(self, event):
         items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
-        if event.key in [pygame.K_UP, pygame.K_w, pygame.K_W]:
+        if event.key in [pygame.K_UP, pygame.K_w]:
             if self.shop_selection > 0:
                 self.shop_selection -= 1
-        elif event.key in [pygame.K_DOWN, pygame.K_s, pygame.K_S]:
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
             if self.shop_selection < len(items) - 1:
                 self.shop_selection += 1
         elif event.key == pygame.K_TAB:

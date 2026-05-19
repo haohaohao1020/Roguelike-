@@ -20,7 +20,38 @@ class Monster(Entity):
         self.frozen = 0
         self.stunned = 0
         
+        self.status_effects = []
         self.blocks_movement = True
+        self.attack_cooldown = 0
+    
+    def add_status(self, status_type, duration, damage=0):
+        for status in self.status_effects:
+            if status['type'] == status_type:
+                status['duration'] = max(status['duration'], duration)
+                return
+        
+        self.status_effects.append({
+            'type': status_type,
+            'duration': duration,
+            'damage': damage
+        })
+    
+    def has_status(self, status_type):
+        return any(s['type'] == status_type for s in self.status_effects)
+    
+    def update_status_effects(self):
+        for status in self.status_effects[:]:
+            if status['damage'] > 0:
+                self.hp -= status['damage']
+            
+            status['duration'] -= 1
+            if status['duration'] <= 0:
+                self.status_effects.remove(status)
+        
+        if self.has_status('frozen'):
+            self.frozen = 3
+        if self.has_status('stunned'):
+            self.stunned = 2
     
     def take_damage(self, amount):
         super().take_damage(amount)
@@ -42,26 +73,39 @@ class Monster(Entity):
         
         distance = self.get_distance_to(player)
         
-        if self.ai_type == 'passive':
-            if distance <= self.aggro_range:
-                self.is_aggro = True
-            if self.is_aggro:
-                self.move_towards(game_map, player, entities)
+        if self.has_status('invisible'):
+            self.is_aggro = False
+            if random.random() < 0.1:
+                dx = random.choice([-1, 0, 1])
+                dy = random.choice([-1, 0, 1])
+                if dx != 0 or dy != 0:
+                    new_x = self.x + dx
+                    new_y = self.y + dy
+                    if game_map.is_walkable(new_x, new_y) and not self.is_blocked(new_x, new_y, entities):
+                        self.x = new_x
+                        self.y = new_y
+            return
         
-        elif self.ai_type == 'aggressive':
+        aggro_multiplier = 1.5 if self.monster_type == 'boss' else 1.0
+        actual_aggro_range = self.aggro_range * aggro_multiplier
+        
+        if distance <= actual_aggro_range:
+            self.is_aggro = True
+        
+        if self.is_aggro:
+            if self.ai_type == 'ranged' and distance <= 5 and random.random() < 0.4:
+                pass
+            elif self.hp < self.max_hp * 0.3 and random.random() < 0.4 and self.ai_type != 'aggressive':
+                self.move_away(game_map, player, entities)
+            else:
+                moves = 2 if self.monster_type == 'boss' else 1
+                for _ in range(moves):
+                    if random.random() < 0.7:
+                        self.move_towards(game_map, player, entities)
+        
+        elif self.ai_type == 'aggressive' and distance <= actual_aggro_range * 2:
             self.is_aggro = True
             self.move_towards(game_map, player, entities)
-        
-        elif self.ai_type == 'ranged':
-            if distance <= 3:
-                self.move_away(game_map, player, entities)
-            elif distance <= self.aggro_range:
-                pass
-            else:
-                self.move_towards(game_map, player, entities)
-        
-        if self.hp < self.max_hp * 0.3 and random.random() < 0.3:
-            self.move_away(game_map, player, entities)
     
     def move_towards(self, game_map, target, entities):
         dx = target.x - self.x

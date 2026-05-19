@@ -75,12 +75,75 @@ class DungeonRenderer:
         for i in range(4):
             pygame.draw.rect(stairs, (70 + i * 25, 50 + i * 20, 20), (5 + i * 6, 5 + i * 6, tile_size - 10 - i * 12, tile_size - 10 - i * 12), 1)
         self.tile_cache['stairs'] = stairs
+        
+        ice = pygame.Surface((tile_size, tile_size))
+        ice.fill((180, 220, 255))
+        for i in range(5):
+            pygame.draw.line(ice, (220, 240, 255), (random.randint(0, tile_size), random.randint(0, tile_size)), (random.randint(0, tile_size), random.randint(0, tile_size)), 1)
+        self.tile_cache['ice'] = ice
+        
+        thorns = pygame.Surface((tile_size, tile_size))
+        thorns.fill((50, 100, 50))
+        for i in range(8):
+            px = random.randint(5, tile_size - 5)
+            py = random.randint(5, tile_size - 5)
+            pygame.draw.polygon(thorns, (30, 70, 30), [(px, py - 4), (px - 3, py + 2), (px + 3, py + 2)])
+        self.tile_cache['thorns'] = thorns
+        
+        poison = pygame.Surface((tile_size, tile_size))
+        poison.fill((80, 130, 50))
+        for i in range(4):
+            px = random.randint(5, tile_size - 5)
+            py = random.randint(5, tile_size - 5)
+            pygame.draw.circle(poison, (100, 160, 60), (px, py), 3)
+        self.tile_cache['poison'] = poison
+        
+        lava = pygame.Surface((tile_size, tile_size))
+        lava.fill((200, 80, 30))
+        for i in range(5):
+            px = random.randint(5, tile_size - 5)
+            py = random.randint(5, tile_size - 5)
+            pygame.draw.circle(lava, (255, 150, 50), (px, py), 2)
+        self.tile_cache['lava'] = lava
+        
+        speed = pygame.Surface((tile_size, tile_size))
+        speed.fill((200, 180, 100))
+        pygame.draw.polygon(speed, (255, 220, 150), [(tile_size // 2, 6), (tile_size // 2 - 6, tile_size // 2), (tile_size // 2 + 6, tile_size // 2)])
+        pygame.draw.polygon(speed, (255, 220, 150), [(tile_size // 2, tile_size - 6), (tile_size // 2 - 6, tile_size // 2), (tile_size // 2 + 6, tile_size // 2)])
+        self.tile_cache['speed'] = speed
+        
+        altar = pygame.Surface((tile_size, tile_size))
+        altar.fill((60, 40, 80))
+        pygame.draw.rect(altar, (100, 80, 120), (8, 16, 16, 12))
+        pygame.draw.circle(altar, (150, 100, 200), (tile_size // 2, 12), 6)
+        self.tile_cache['altar'] = altar
+        
+        blacksmith = pygame.Surface((tile_size, tile_size))
+        blacksmith.fill((80, 60, 40))
+        pygame.draw.rect(blacksmith, (150, 100, 50), (6, 20, 20, 8))
+        pygame.draw.rect(blacksmith, (200, 150, 100), (10, 10, 12, 12))
+        self.tile_cache['blacksmith'] = blacksmith
+        
+        library = pygame.Surface((tile_size, tile_size))
+        library.fill((60, 50, 40))
+        pygame.draw.rect(library, (100, 80, 60), (4, 8, 24, 20))
+        for i in range(4):
+            pygame.draw.line(library, (150, 120, 90), (8 + i * 6, 10), (8 + i * 6, 24), 2)
+        self.tile_cache['library'] = library
+        
+        event = pygame.Surface((tile_size, tile_size))
+        event.fill((50, 60, 70))
+        pygame.draw.circle(event, (100, 150, 200), (tile_size // 2, tile_size // 2), 8)
+        pygame.draw.circle(event, (150, 200, 255), (tile_size // 2, tile_size // 2), 4)
+        self.tile_cache['event'] = event
     
-    def draw_floor(self, screen, x, y, camera_x, camera_y, room_type='normal', visible=True):
+    def draw_floor(self, screen, x, y, camera_x, camera_y, room_type='normal', terrain='normal', visible=True):
         screen_x = x * TILE_SIZE - int(camera_x)
         screen_y = y * TILE_SIZE - int(camera_y)
         
-        if room_type == 'normal':
+        if terrain != 'normal':
+            tile = self.tile_cache.get(terrain, self.tile_cache['floor'][0])
+        elif room_type == 'normal':
             tile_variant = (x + y) % 4
             tile = self.tile_cache['floor'][tile_variant]
         elif room_type == 'treasure':
@@ -93,6 +156,14 @@ class DungeonRenderer:
             tile = self.tile_cache['trap']
         elif room_type == 'boss':
             tile = self.tile_cache['boss']
+        elif room_type == 'altar':
+            tile = self.tile_cache['altar']
+        elif room_type == 'blacksmith':
+            tile = self.tile_cache['blacksmith']
+        elif room_type == 'library':
+            tile = self.tile_cache['library']
+        elif room_type == 'event':
+            tile = self.tile_cache['event']
         else:
             tile = self.tile_cache['corridor']
         
@@ -435,3 +506,28 @@ class PlayerRenderer:
         pygame.draw.polygon(screen, (150, 150, 150), [
             (screen_x + 26, screen_y + 12), (screen_x + 32, screen_y + 18), (screen_x + 26, screen_y + 22)
         ])
+    
+    def draw_paladin(self, screen, x, y, camera_x, camera_y, is_hurt=False):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        body_color = (220, 200, 150) if not is_hurt else (255, 255, 255)
+        
+        pygame.draw.circle(screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2 + 2), 12)
+        
+        pygame.draw.circle(screen, (255, 220, 180), (screen_x + TILE_SIZE // 2, screen_y + 8), 7)
+        
+        pygame.draw.circle(screen, (100, 50, 50), (screen_x + 13, screen_y + 7), 2)
+        pygame.draw.circle(screen, (100, 50, 50), (screen_x + 19, screen_y + 7), 2)
+        
+        pygame.draw.rect(screen, (200, 180, 100), (screen_x + 6, screen_y + 2, 20, 5))
+        
+        pygame.draw.rect(screen, (200, 150, 50), (screen_x + 2, screen_y + 10, 6, 16))
+        pygame.draw.rect(screen, (255, 220, 100), (screen_x + 2, screen_y + 10, 6, 3))
+        
+        pygame.draw.rect(screen, (180, 180, 200), (screen_x + 24, screen_y + 8, 5, 18))
+        pygame.draw.rect(screen, (220, 220, 255), (screen_x + 22, screen_y + 6, 9, 5))
+        
+        aura = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(aura, (255, 255, 200, 30), (TILE_SIZE // 2, TILE_SIZE // 2), 16)
+        screen.blit(aura, (screen_x, screen_y))

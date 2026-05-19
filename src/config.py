@@ -40,7 +40,16 @@ QUALITY_COLORS = {
     'legendary': GOLD
 }
 
-ROOM_TYPES = ['normal', 'treasure', 'shop', 'rest', 'trap', 'boss']
+ROOM_TYPES = ['normal', 'treasure', 'shop', 'rest', 'trap', 'boss', 'altar', 'blacksmith', 'library', 'event']
+
+TERRAIN_TYPES = {
+    'normal': {'name': '普通地板', 'color': (80, 60, 40), 'effect': None},
+    'ice': {'name': '冰面', 'color': (150, 200, 255), 'effect': 'slip'},
+    'thorns': {'name': '荆棘', 'color': (50, 100, 50), 'effect': 'damage'},
+    'poison': {'name': '毒池', 'color': (100, 150, 50), 'effect': 'poison'},
+    'lava': {'name': '岩浆', 'color': (200, 100, 50), 'effect': 'fire'},
+    'speed': {'name': '加速地板', 'color': (200, 150, 100), 'effect': 'speed'}
+}
 
 CLASSES = {
     'warrior': {
@@ -75,6 +84,17 @@ CLASSES = {
         'def': 8,
         'speed': 2,
         'description': '跑得快闪避高还能背刺'
+    },
+    'paladin': {
+        'name': '圣骑士',
+        'hp': 130,
+        'mp': 80,
+        'str': 14,
+        'dex': 10,
+        'int': 14,
+        'def': 18,
+        'speed': 1,
+        'description': '能奶能抗有光环'
     }
 }
 
