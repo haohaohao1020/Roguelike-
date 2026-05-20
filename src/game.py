@@ -62,6 +62,7 @@ class Game:
         self.message_log = []
         self.room_colors = {}
         self.last_room_type = None
+        self.used_rooms = set()
     
     def add_message(self, text):
         self.message_log.append(text)
@@ -74,6 +75,7 @@ class Game:
         
         self.monsters = []
         self.items = []
+        self.used_rooms = set()
         
         if self.game_map.rooms:
             start_room = self.game_map.rooms[0]
@@ -208,17 +210,15 @@ class Game:
             self.shop.refresh_items()
             self.add_message('欢迎来到商店！')
         elif current_room_type == 'rest' and self.last_room_type != 'rest':
-            heal_amount = int(self.player.max_hp * 0.3)
-            mp_amount = int(self.player.max_mp * 0.3)
-            self.player.heal(heal_amount)
-            self.player.restore_mp(mp_amount)
-            self.add_message(f'在休息点恢复了 {heal_amount} 生命和 {mp_amount} 魔力！')
+            self.add_message('休息点！按 E 键恢复生命和魔力。')
         elif current_room_type == 'altar' and self.last_room_type != 'altar':
             self.add_message('你发现了一座神秘的祭坛！按 E 键献祭生命获得强化。')
         elif current_room_type == 'blacksmith' and self.last_room_type != 'blacksmith':
-            self.add_message('你找到了铁匠铺！按 E 键强化装备。')
+            self.add_message('你找到了铁匠铺！按 E 键强化攻击。')
         elif current_room_type == 'library' and self.last_room_type != 'library':
             self.add_message('古老的图书馆！按 E 键阅读获得永久属性加成。')
+        elif current_room_type == 'event' and self.last_room_type != 'event':
+            self.add_message('神秘的事件房间！按 E 键触发随机事件。')
         
         self.last_room_type = current_room_type
         
@@ -895,7 +895,7 @@ class Game:
         pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
         
         help_lines = [
-            '↑↓:选择 | E:装备 | U:脱下全部 | D:分解 | R:批量分解白装 | ESC:关闭'
+            '↑↓:选择 | E:装备 | U:脱下 | D:分解(金币) | R:批量分解白装 | 空格:使用 | ESC:关闭'
         ]
         help_text = FONT_NORMAL.render(help_lines[0], True, GRAY)
         help_rect = help_text.get_rect(center=help_bg.center)
@@ -1347,57 +1347,76 @@ class Game:
             self.add_message('这里没有可交互的对象！')
             return
         
+        room_id = (room.x1, room.y1, room.x2, room.y2)
         room_type = room.room_type
         interaction_happened = False
         
+        special_room_types = ['altar', 'blacksmith', 'library', 'event', 'rest']
+        
+        if room_type in special_room_types and room_id in self.used_rooms:
+            self.add_message('这个房间的效果已经使用过了！')
+            return
+        
         if room_type == 'altar':
-            interaction_happened = True
             if self.player.hp > 10:
-                sacrifice = int(self.player.max_hp * 0.2)
+                sacrifice = int(self.player.get_total_max_hp() * 0.2)
                 self.player.hp -= sacrifice
                 self.player.str += 3
                 self.player.defense += 2
                 self.add_message(f'献祭了{sacrifice}点生命，获得力量提升！')
+                interaction_happened = True
             else:
                 self.add_message('生命值不足，无法献祭！')
         
         elif room_type == 'blacksmith':
-            interaction_happened = True
             if self.player.gold >= 50:
                 self.player.gold -= 50
                 self.player.base_attack_count += 1
                 self.add_message('花费50金币，铁匠强化了你的攻击！')
+                interaction_happened = True
             else:
                 self.add_message('金币不足，无法强化！')
         
         elif room_type == 'library':
-            interaction_happened = True
             self.player.int += 5
-            self.player.max_mp += 20
-            self.player.mp = self.player.max_mp
-            self.add_message('阅读古老典籍，智力与魔力永久提升！')
+            max_mp_boost = 20
+            self.player.max_mp += max_mp_boost
+            self.player.mp = self.player.get_total_max_mp()
+            self.add_message(f'阅读古老典籍，智力+5，最大魔力+{max_mp_boost}！')
+            interaction_happened = True
         
         elif room_type == 'event':
-            interaction_happened = True
             event_roll = random.random()
             if event_roll < 0.3:
-                heal_amount = int(self.player.max_hp * 0.5)
-                self.player.hp = min(self.player.max_hp, self.player.hp + heal_amount)
-                self.add_message(f'神秘泉水恢复了{heal_amount}点生命！')
+                heal_amount = int(self.player.get_total_max_hp() * 0.5)
+                actual_heal = self.player.heal(heal_amount)
+                self.add_message(f'神秘泉水恢复了{actual_heal}点生命！')
             elif event_roll < 0.6:
-                self.player.gold += random.randint(30, 80)
-                self.add_message('发现了一个藏宝箱，获得金币！')
+                gold = random.randint(30, 80)
+                self.player.gold += gold
+                self.add_message(f'发现了一个藏宝箱，获得{gold}金币！')
             elif event_roll < 0.8:
                 self.player.add_status('poison', 5, 3)
                 self.add_message('触发了古老诅咒，中毒了！')
             else:
                 self.player.str += 2
                 self.player.dex += 2
-                self.add_message('获得了神秘的祝福！')
+                self.add_message('获得了神秘的祝福！力量+2，敏捷+2！')
+            interaction_happened = True
+        
+        elif room_type == 'rest':
+            heal_amount = int(self.player.get_total_max_hp() * 0.3)
+            mp_amount = int(self.player.get_total_max_mp() * 0.3)
+            actual_heal = self.player.heal(heal_amount)
+            actual_mp = self.player.restore_mp(mp_amount)
+            self.add_message(f'在休息点恢复了{actual_heal}生命和{actual_mp}魔力！')
+            interaction_happened = True
         else:
             self.add_message('这个房间没有特殊功能。')
         
         if interaction_happened:
+            if room_type in special_room_types:
+                self.used_rooms.add(room_id)
             self.end_player_turn()
     
     def handle_pause_input(self, event):
@@ -1451,24 +1470,56 @@ class Game:
                 else:
                     self.add_message('这个物品无法装备！')
         elif event.key in [pygame.K_u]:
-            unequipped = self.player.unequip_all()
-            if unequipped:
-                self.add_message(f'📤 已脱下 {len(unequipped)} 件装备！')
-            else:
-                self.add_message('没有可脱下的装备或背包已满！')
+            if 0 <= self.inventory_selection < len(display_items):
+                item = display_items[self.inventory_selection]
+                if hasattr(item, 'slot'):
+                    slot = item.slot
+                    equipped_item = self.player.equipment.get(slot)
+                    if equipped_item:
+                        if len(self.player.inventory) < 50:
+                            self.player.inventory.append(equipped_item)
+                            self.player.equipment[slot] = None
+                            self.add_message(f'📤 已脱下 {equipped_item.name}！')
+                        else:
+                            self.add_message('背包已满，无法脱下！')
+                    else:
+                        self.add_message(f'{SLOT_NAMES[slot]}部位没有装备！')
+                else:
+                    self.add_message('只能脱下装备！')
         elif event.key in [pygame.K_d]:
             if 0 <= self.inventory_selection < len(display_items):
                 item = display_items[self.inventory_selection]
                 if hasattr(item, 'item_type') and item.item_type == 'equipment':
-                    materials = self.player.decompose_equipment(item)
-                    self.add_message(f'🔨 分解了 {item.name}，获得 {materials} 个强化材料！')
+                    gold = item.value
+                    self.player.gold += gold
+                    if item in self.player.inventory:
+                        self.player.inventory.remove(item)
+                    elif item in self.player.equipment.values():
+                        for slot, equip in self.player.equipment.items():
+                            if equip == item:
+                                self.player.equipment[slot] = None
+                                break
+                    self.add_message(f'� 分解了 {item.name}，获得 {gold} 金币！')
                     self.inventory_selection = min(self.inventory_selection, len(self.player.get_sorted_inventory()) - 1)
                 else:
                     self.add_message('只能分解装备！')
         elif event.key in [pygame.K_r]:
-            materials = self.player.bulk_decompose('common')
-            if materials > 0:
-                self.add_message(f'🔨 批量分解完成，获得 {materials} 个强化材料！')
+            total_gold = 0
+            quality_order = {'common': 1, 'uncommon': 2, 'rare': 3, 'epic': 4, 'legendary': 5}
+            
+            to_decompose = []
+            for item in self.player.inventory:
+                if (hasattr(item, 'item_type') and item.item_type == 'equipment' and 
+                    quality_order.get(item.quality, 1) <= 1):
+                    to_decompose.append(item)
+            
+            for item in to_decompose:
+                total_gold += item.value
+                self.player.inventory.remove(item)
+            
+            if total_gold > 0:
+                self.player.gold += total_gold
+                self.add_message(f'� 批量分解完成，获得 {total_gold} 金币！')
             else:
                 self.add_message('没有可分解的白装！')
             self.inventory_selection = 0

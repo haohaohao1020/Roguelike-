@@ -298,12 +298,16 @@ class Character(Entity):
         return actual_damage
     
     def heal(self, amount):
-        self.hp = min(self.max_hp, self.hp + amount)
-        return amount
+        max_hp = self.get_total_max_hp()
+        actual_heal = min(amount, max_hp - self.hp)
+        self.hp = min(max_hp, self.hp + amount)
+        return actual_heal
     
     def restore_mp(self, amount):
-        self.mp = min(self.max_mp, self.mp + amount)
-        return amount
+        max_mp = self.get_total_max_mp()
+        actual_restore = min(amount, max_mp - self.mp)
+        self.mp = min(max_mp, self.mp + amount)
+        return actual_restore
     
     def gain_exp(self, amount):
         self.exp += amount
