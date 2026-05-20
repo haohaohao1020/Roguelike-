@@ -98,7 +98,135 @@ CLASSES = {
     }
 }
 
-EQUIPMENT_SLOTS = ['weapon', 'armor', 'helmet', 'boots', 'accessory']
+EQUIPMENT_SLOTS = ['weapon', 'helmet', 'chest', 'leggings', 'boots', 'accessory']
+
+QUALITY_NAMES = {
+    'common': '白装',
+    'uncommon': '蓝装',
+    'rare': '紫装',
+    'epic': '橙装',
+    'legendary': '金装'
+}
+
+QUALITY_BORDER_COLORS = {
+    'common': (150, 150, 150),
+    'uncommon': (100, 200, 100),
+    'rare': (100, 100, 255),
+    'epic': (200, 100, 200),
+    'legendary': (255, 215, 0)
+}
+
+SUB_STAT_TYPES = [
+    'hp_regen', 'mp_regen', 'physical_lifesteal', 'magic_lifesteal',
+    'damage_reflect', 'status_resistance', 'boss_damage', 'mob_damage',
+    'damage_reduction'
+]
+
+SUB_STAT_NAMES = {
+    'hp_regen': '生命回复',
+    'mp_regen': '法力回复',
+    'physical_lifesteal': '物理吸血',
+    'magic_lifesteal': '法术吸血',
+    'damage_reflect': '伤害反弹',
+    'status_resistance': '异常抗性',
+    'boss_damage': 'BOSS增伤',
+    'mob_damage': '小怪增伤',
+    'damage_reduction': '减伤百分比'
+}
+
+ELEMENT_TYPES = ['fire', 'ice', 'lightning', 'poison']
+ELEMENT_NAMES = {
+    'fire': '火焰',
+    'ice': '冰霜',
+    'lightning': '雷电',
+    'poison': '剧毒'
+}
+ELEMENT_COLORS = {
+    'fire': (255, 100, 50),
+    'ice': (100, 200, 255),
+    'lightning': (255, 255, 100),
+    'poison': (100, 200, 100)
+}
+
+RUNE_TYPES = ['strength', 'dexterity', 'intelligence', 'vitality', 'critical']
+RUNE_NAMES = {
+    'strength': '力量符文',
+    'dexterity': '敏捷符文',
+    'intelligence': '智力符文',
+    'vitality': '体力符文',
+    'critical': '暴击符文'
+}
+
+SET_NAMES = [
+    '烈焰套装', '寒冰套装', '雷霆套装', '剧毒套装',
+    '战士套装', '法师套装', '盗贼套装', '圣骑士套装'
+]
+
+SET_BONUSES = {
+    '烈焰套装': {
+        2: {'fire_damage': 10},
+        3: {'fire_resistance': 20},
+        5: {'fire_aoe': True}
+    },
+    '寒冰套装': {
+        2: {'ice_damage': 10},
+        3: {'freeze_chance': 10},
+        5: {'ice_shield': True}
+    },
+    '雷霆套装': {
+        2: {'lightning_damage': 10},
+        3: {'attack_speed': 15},
+        5: {'chain_lightning': True}
+    },
+    '剧毒套装': {
+        2: {'poison_damage': 10},
+        3: {'poison_duration': 3},
+        5: {'poison_explosion': True}
+    },
+    '战士套装': {
+        2: {'physical_defense': 20},
+        3: {'max_hp': 100},
+        5: {'berserker': True}
+    },
+    '法师套装': {
+        2: {'magic_attack': 15},
+        3: {'max_mp': 50},
+        5: {'spell_amplify': True}
+    },
+    '盗贼套装': {
+        2: {'evasion': 10},
+        3: {'critical_chance': 10},
+        5: {'backstab': True}
+    },
+    '圣骑士套装': {
+        2: {'heal_power': 20},
+        3: {'holy_shield': 15},
+        5: {'divine_blessing': True}
+    }
+}
+
+SLOT_NAMES = {
+    'weapon': '武器',
+    'helmet': '头盔',
+    'chest': '胸甲',
+    'leggings': '护腿',
+    'boots': '鞋子',
+    'accessory': '饰品'
+}
+
+BASE_STAT_NAMES = {
+    'physical_attack': '物理攻击',
+    'magic_attack': '法术攻击',
+    'physical_defense': '物理防御',
+    'magic_defense': '法术防御',
+    'max_hp': '最大生命',
+    'max_mp': '最大法力',
+    'move_speed': '移动速度',
+    'critical_chance': '暴击率',
+    'critical_damage': '暴击伤害',
+    'evasion': '闪避率',
+    'block_rate': '格挡率'
+}
 
 MAX_FLOOR = 5
 

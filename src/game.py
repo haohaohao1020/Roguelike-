@@ -92,7 +92,7 @@ class Game:
                         self.monsters.append(monster)
             elif room.room_type == 'treasure':
                 x, y = room.center()
-                self.items.append(Chest(x, y))
+                self.items.append(Chest(x, y, self.floor))
             elif room.room_type == 'boss':
                 if self.floor >= MAX_FLOOR:
                     x, y = room.center()
@@ -110,12 +110,12 @@ class Game:
                 if not any(e.x == x and e.y == y for e in self.monsters + self.items):
                     item_type = random.choice(['gold', 'potion', 'equipment'])
                     if item_type == 'gold':
-                        self.items.append(Gold(x, y, random.randint(10, 50)))
+                        self.items.append(Gold(x, y, random.randint(10, 50) * self.floor))
                     elif item_type == 'potion':
                         potion_type = random.choice(['health', 'mana'])
                         self.items.append(Potion(x, y, potion_type))
                     else:
-                        item = create_random_item(x, y)
+                        item = create_random_item(x, y, self.floor)
                         if item:
                             self.items.append(item)
         
@@ -397,7 +397,34 @@ class Game:
         self.render_ui()
     
     def render_ui(self):
-        top_panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 10, 800, 100)
+        top_left_log_rect = pygame.Rect(10, 10, 350, 200)
+        pygame.draw.rect(self.screen, (20, 20, 30), top_left_log_rect)
+        pygame.draw.rect(self.screen, (50, 50, 70), top_left_log_rect, 2)
+        
+        log_title = FONT_NORMAL.render('📜 战斗日志', True, GOLD)
+        self.screen.blit(log_title, (top_left_log_rect.x + 10, top_left_log_rect.y + 8))
+        
+        y_log = top_left_log_rect.y + 35
+        for msg in self.message_log[-8:]:
+            msg_text = FONT_SMALL.render(msg, True, (200, 200, 220))
+            self.screen.blit(msg_text, (top_left_log_rect.x + 12, y_log))
+            y_log += 20
+        
+        key_hints_rect = pygame.Rect(10, 220, 350, 60)
+        pygame.draw.rect(self.screen, (20, 20, 30), key_hints_rect)
+        pygame.draw.rect(self.screen, (50, 50, 70), key_hints_rect, 2)
+        
+        hint_lines = [
+            '方向键/WASD:移动 | 空格:攻击 | E:交互',
+            'I:背包 | T:天赋 | ESC:暂停'
+        ]
+        y_hint = key_hints_rect.y + 8
+        for line in hint_lines:
+            hint_text = FONT_SMALL.render(line, True, (150, 150, 180))
+            self.screen.blit(hint_text, (key_hints_rect.x + 10, y_hint))
+            y_hint += 22
+        
+        top_panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 300, 10, 600, 90)
         pygame.draw.rect(self.screen, (30, 30, 40), top_panel_rect)
         pygame.draw.rect(self.screen, (80, 80, 100), top_panel_rect, 2)
         
@@ -409,56 +436,65 @@ class Game:
         self.screen.blit(title_text, title_rect)
         self.screen.blit(level_text, level_rect)
         
-        bar_width = 350
+        bar_width = 280
         bar_x = top_panel_rect.centerx - bar_width // 2
         
-        y = top_panel_rect.y + 50
-        hp_ratio = self.player.hp / self.player.max_hp
-        pygame.draw.rect(self.screen, (80, 0, 0), (bar_x, y, bar_width, 18))
-        pygame.draw.rect(self.screen, (220, 50, 50), (bar_x, y, int(bar_width * hp_ratio), 18))
-        pygame.draw.rect(self.screen, (255, 100, 100), (bar_x, y, int(bar_width * hp_ratio), 6))
-        hp_text = FONT_SMALL.render(f'❤️ {self.player.hp}/{self.player.max_hp}', True, WHITE)
-        hp_text_rect = hp_text.get_rect(center=(bar_x + bar_width // 2, y + 9))
+        y = top_panel_rect.y + 48
+        max_hp = self.player.get_total_max_hp()
+        hp_ratio = self.player.hp / max_hp
+        pygame.draw.rect(self.screen, (80, 0, 0), (bar_x, y, bar_width, 16))
+        pygame.draw.rect(self.screen, (220, 50, 50), (bar_x, y, int(bar_width * hp_ratio), 16))
+        pygame.draw.rect(self.screen, (255, 100, 100), (bar_x, y, int(bar_width * hp_ratio), 5))
+        hp_text = FONT_SMALL.render(f'❤️ {self.player.hp}/{max_hp}', True, WHITE)
+        hp_text_rect = hp_text.get_rect(center=(bar_x + bar_width // 2, y + 8))
         self.screen.blit(hp_text, hp_text_rect)
         
-        y += 22
-        mp_ratio = self.player.mp / self.player.max_mp
-        pygame.draw.rect(self.screen, (0, 0, 80), (bar_x, y, bar_width, 18))
-        pygame.draw.rect(self.screen, (50, 100, 220), (bar_x, y, int(bar_width * mp_ratio), 18))
-        pygame.draw.rect(self.screen, (100, 150, 255), (bar_x, y, int(bar_width * mp_ratio), 6))
-        mp_text = FONT_SMALL.render(f'💧 {self.player.mp}/{self.player.max_mp}', True, WHITE)
-        mp_text_rect = mp_text.get_rect(center=(bar_x + bar_width // 2, y + 9))
+        y += 18
+        max_mp = self.player.get_total_max_mp()
+        mp_ratio = self.player.mp / max_mp
+        pygame.draw.rect(self.screen, (0, 0, 80), (bar_x, y, bar_width, 16))
+        pygame.draw.rect(self.screen, (50, 100, 220), (bar_x, y, int(bar_width * mp_ratio), 16))
+        pygame.draw.rect(self.screen, (100, 150, 255), (bar_x, y, int(bar_width * mp_ratio), 5))
+        mp_text = FONT_SMALL.render(f'💧 {self.player.mp}/{max_mp}', True, WHITE)
+        mp_text_rect = mp_text.get_rect(center=(bar_x + bar_width // 2, y + 8))
         self.screen.blit(mp_text, mp_text_rect)
         
-        left_panel_rect = pygame.Rect(10, 120, 200, 300)
+        left_panel_rect = pygame.Rect(10, 295, 200, 420)
         pygame.draw.rect(self.screen, (30, 30, 40), left_panel_rect)
         pygame.draw.rect(self.screen, (60, 60, 80), left_panel_rect, 2)
         
-        y = left_panel_rect.y + 15
-        stats_title = FONT_NORMAL.render('属性', True, GOLD)
-        self.screen.blit(stats_title, (left_panel_rect.x + 15, y))
-        y += 30
+        y = left_panel_rect.y + 12
+        stats_title = FONT_NORMAL.render('📊 属性', True, GOLD)
+        self.screen.blit(stats_title, (left_panel_rect.x + 12, y))
+        y += 28
         
         stats_text = [
-            f'⚔️ 力量: {self.player.get_total_str()}',
+            f'⚔️ 物攻: {self.player.get_total_physical_attack()}',
+            f'✨ 法攻: {self.player.get_total_magic_attack()}',
+            f'🛡️ 物防: {self.player.get_total_physical_defense()}',
+            f'🔮 法防: {self.player.get_total_magic_defense()}',
+            f'💪 力量: {self.player.get_total_str()}',
             f'🏃 敏捷: {self.player.get_total_dex()}',
-            f'✨ 智力: {self.player.get_total_int()}',
-            f'🛡️ 防御: {self.player.get_total_defense()}'
+            f'📖 智力: {self.player.get_total_int()}',
+            f'� 暴击: {self.player.get_total_critical_chance()}%',
+            f'⚡ 暴伤: {self.player.get_total_critical_damage()}%',
+            f'👻 闪避: {self.player.get_total_evasion()}%',
+            f'🛡️ 格挡: {self.player.get_total_block_rate()}%'
         ]
         for text in stats_text:
             stat_text = FONT_SMALL.render(text, True, (200, 200, 200))
-            self.screen.blit(stat_text, (left_panel_rect.x + 15, y))
-            y += 25
+            self.screen.blit(stat_text, (left_panel_rect.x + 12, y))
+            y += 22
         
-        y += 10
+        y += 8
         gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
-        self.screen.blit(gold_text, (left_panel_rect.x + 15, y))
+        self.screen.blit(gold_text, (left_panel_rect.x + 12, y))
         
         if self.player.status_effects:
-            y += 30
+            y += 28
             status_title = FONT_SMALL.render('状态效果:', True, GOLD)
-            self.screen.blit(status_title, (left_panel_rect.x + 15, y))
-            y += 20
+            self.screen.blit(status_title, (left_panel_rect.x + 12, y))
+            y += 18
             for status in self.player.status_effects[:4]:
                 status_color = {
                     'poison': (100, 200, 100),
@@ -470,15 +506,15 @@ class Game:
                     'invisible': (200, 200, 255)
                 }.get(status['type'], WHITE)
                 status_text = FONT_SMALL.render(f"  {status['type']} ({status['duration']})", True, status_color)
-                self.screen.blit(status_text, (left_panel_rect.x + 15, y))
-                y += 18
+                self.screen.blit(status_text, (left_panel_rect.x + 12, y))
+                y += 16
         
-        right_panel_rect = pygame.Rect(SCREEN_WIDTH - 220, 120, 210, 350)
+        right_panel_rect = pygame.Rect(SCREEN_WIDTH - 220, 10, 210, 400)
         pygame.draw.rect(self.screen, (30, 30, 40), right_panel_rect)
         pygame.draw.rect(self.screen, (60, 60, 80), right_panel_rect, 2)
         
-        minimap_size = 200
-        minimap_rect = pygame.Rect(right_panel_rect.x + 5, right_panel_rect.y + 10, minimap_size, minimap_size)
+        minimap_size = 190
+        minimap_rect = pygame.Rect(right_panel_rect.x + 10, right_panel_rect.y + 10, minimap_size, minimap_size)
         pygame.draw.rect(self.screen, (15, 15, 25), minimap_rect)
         pygame.draw.rect(self.screen, (60, 60, 80), minimap_rect, 2)
         
@@ -536,38 +572,19 @@ class Game:
         floor_rect = floor_text.get_rect(center=(minimap_rect.centerx, minimap_rect.y + minimap_size + 15))
         self.screen.blit(floor_text, floor_rect)
         
-        exp_bar_rect = pygame.Rect(right_panel_rect.x + 10, minimap_rect.y + minimap_size + 45, 190, 15)
+        exp_bar_rect = pygame.Rect(right_panel_rect.x + 10, minimap_rect.y + minimap_size + 45, 190, 14)
         pygame.draw.rect(self.screen, (40, 40, 0), exp_bar_rect)
         exp_ratio = self.player.exp / self.player.exp_to_next
-        pygame.draw.rect(self.screen, (200, 200, 0), (exp_bar_rect.x, exp_bar_rect.y, int(190 * exp_ratio), 15))
+        pygame.draw.rect(self.screen, (200, 200, 0), (exp_bar_rect.x, exp_bar_rect.y, int(190 * exp_ratio), 14))
         exp_text = FONT_SMALL.render(f'EXP: {self.player.exp}/{self.player.exp_to_next}', True, WHITE)
-        exp_rect = exp_text.get_rect(center=(exp_bar_rect.centerx, exp_bar_rect.y + 30))
+        exp_rect = exp_text.get_rect(center=(exp_bar_rect.centerx, exp_bar_rect.y + 28))
         self.screen.blit(exp_text, exp_rect)
         
-        log_rect = pygame.Rect(10, SCREEN_HEIGHT - 150, SCREEN_WIDTH - 240, 140)
-        pygame.draw.rect(self.screen, (25, 25, 35), log_rect)
-        pygame.draw.rect(self.screen, (60, 60, 80), log_rect, 2)
+        collection_text = FONT_SMALL.render(f'📚 图鉴: {self.player.get_collection_count()}', True, GOLD)
+        self.screen.blit(collection_text, (right_panel_rect.x + 12, exp_bar_rect.y + 55))
         
-        log_title = FONT_NORMAL.render('战斗日志', True, GRAY)
-        self.screen.blit(log_title, (log_rect.x + 10, log_rect.y + 5))
-        
-        y_log = log_rect.y + 35
-        for msg in self.message_log[-5:]:
-            msg_text = FONT_SMALL.render(msg, True, (220, 220, 220))
-            self.screen.blit(msg_text, (log_rect.x + 15, y_log))
-            y_log += 22
-        
-        help_bg = pygame.Rect(10, SCREEN_HEIGHT - 55, 450, 45)
-        pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
-        pygame.draw.rect(self.screen, (60, 60, 80), help_bg, 2)
-        
-        help_lines = [
-            '方向键/WASD:移动 | 空格:攻击 | E:交互 | I:背包 | T:天赋 | ESC:暂停'
-        ]
-        y_help = help_bg.y + 12
-        for line in help_lines:
-            help_text = FONT_SMALL.render(line, True, GRAY)
-            self.screen.blit(help_text, (help_bg.x + 10, y_help))
+        material_text = FONT_SMALL.render(f'💎 材料: {self.player.enhance_materials}', True, (150, 200, 255))
+        self.screen.blit(material_text, (right_panel_rect.x + 12, exp_bar_rect.y + 78))
     
     def render_menu(self):
         title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 80, 600, 120)
@@ -688,93 +705,201 @@ class Game:
     
     def render_inventory(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 200))
+        overlay.fill((0, 0, 0, 220))
         self.screen.blit(overlay, (0, 0))
         
-        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 80, 800, 560)
-        pygame.draw.rect(self.screen, (30, 30, 45), panel_rect)
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 500, 50, 1000, 650)
+        pygame.draw.rect(self.screen, (25, 25, 38), panel_rect)
         pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
         
-        title = FONT_LARGE.render('背包', True, GOLD)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 110))
+        title = FONT_LARGE.render('🎒 背包 & 装备', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
         self.screen.blit(title, title_rect)
         
         gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
-        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 300, 110))
+        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 400, 85))
         
-        items_rect = pygame.Rect(panel_rect.x + 20, 150, 450, 400)
-        pygame.draw.rect(self.screen, (25, 25, 35), items_rect)
-        pygame.draw.rect(self.screen, (60, 60, 80), items_rect, 2)
+        equip_panel_rect = pygame.Rect(panel_rect.x + 20, 110, 280, 400)
+        pygame.draw.rect(self.screen, (20, 20, 30), equip_panel_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), equip_panel_rect, 2)
         
-        y = 160
-        for i, item in enumerate(self.player.inventory[:15]):
+        equip_title = FONT_NORMAL.render('⚔️ 已装备', True, GOLD)
+        self.screen.blit(equip_title, (equip_panel_rect.x + 15, equip_panel_rect.y + 12))
+        
+        slot_positions = [
+            ('weapon', equip_panel_rect.x + 20, equip_panel_rect.y + 50),
+            ('helmet', equip_panel_rect.x + 150, equip_panel_rect.y + 50),
+            ('chest', equip_panel_rect.x + 20, equip_panel_rect.y + 110),
+            ('leggings', equip_panel_rect.x + 150, equip_panel_rect.y + 110),
+            ('boots', equip_panel_rect.x + 20, equip_panel_rect.y + 170),
+            ('accessory', equip_panel_rect.x + 150, equip_panel_rect.y + 170)
+        ]
+        
+        for slot, x, y in slot_positions:
+            item = self.player.equipment[slot]
+            slot_rect = pygame.Rect(x, y, 110, 50)
+            
+            if item:
+                quality_color = QUALITY_BORDER_COLORS.get(item.quality, GRAY)
+                pygame.draw.rect(self.screen, (40, 40, 55), slot_rect)
+                pygame.draw.rect(self.screen, quality_color, slot_rect, 2)
+                
+                if item.quality == 'legendary':
+                    glow_surf = pygame.Surface((114, 54), pygame.SRCALPHA)
+                    glow_alpha = int(100 + 50 * pygame.time.get_ticks() / 500 % 1)
+                    pygame.draw.rect(glow_surf, (255, 215, 0, glow_alpha), (2, 2, 110, 50), 2)
+                    self.screen.blit(glow_surf, (x - 2, y - 2))
+                
+                name_color = QUALITY_COLORS.get(item.quality, WHITE)
+                name_text = FONT_SMALL.render(item.name, True, name_color)
+                name_rect = name_text.get_rect(center=(slot_rect.centerx, slot_rect.y + 15))
+                self.screen.blit(name_text, name_rect)
+                
+                power_text = FONT_SMALL.render(f'战力:{item.get_power()}', True, YELLOW)
+                power_rect = power_text.get_rect(center=(slot_rect.centerx, slot_rect.y + 35))
+                self.screen.blit(power_text, power_rect)
+            else:
+                pygame.draw.rect(self.screen, (30, 30, 40), slot_rect)
+                pygame.draw.rect(self.screen, (60, 60, 70), slot_rect, 2)
+                slot_text = FONT_SMALL.render(SLOT_NAMES[slot], True, GRAY)
+                slot_rect_text = slot_text.get_rect(center=slot_rect.center)
+                self.screen.blit(slot_text, slot_rect_text)
+        
+        set_counts = self.player.get_set_counts()
+        if set_counts:
+            y_set = equip_panel_rect.y + 240
+            set_title = FONT_SMALL.render('📦 套装效果:', True, GOLD)
+            self.screen.blit(set_title, (equip_panel_rect.x + 15, y_set))
+            y_set += 22
+            for set_name, count in set_counts.items():
+                set_text = FONT_SMALL.render(f'  {set_name} ({count}/5)', True, CYAN)
+                self.screen.blit(set_text, (equip_panel_rect.x + 15, y_set))
+                y_set += 18
+        
+        items_panel_rect = pygame.Rect(panel_rect.x + 310, 110, 400, 500)
+        pygame.draw.rect(self.screen, (20, 20, 30), items_panel_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), items_panel_rect, 2)
+        
+        items_title = FONT_NORMAL.render('📦 物品列表', True, GOLD)
+        self.screen.blit(items_title, (items_panel_rect.x + 15, items_panel_rect.y + 12))
+        
+        sort_text = FONT_SMALL.render('排序:战力 | 筛选:全部', True, GRAY)
+        self.screen.blit(sort_text, (items_panel_rect.x + 200, items_panel_rect.y + 15))
+        
+        display_items = self.player.get_sorted_inventory()
+        y_item = items_panel_rect.y + 45
+        for i, item in enumerate(display_items[:18]):
             if i == self.inventory_selection:
-                bg_color = (60, 70, 90)
-                text_color = YELLOW
+                bg_color = (50, 50, 70)
             else:
                 bg_color = (35, 35, 50)
-                text_color = WHITE
             
-            item_bg = pygame.Rect(items_rect.x + 10, y, 430, 25)
+            item_bg = pygame.Rect(items_panel_rect.x + 8, y_item, 384, 24)
             pygame.draw.rect(self.screen, bg_color, item_bg)
             
-            item_text = FONT_NORMAL.render(f'{i + 1}. {item.name}', True, text_color)
-            self.screen.blit(item_text, (items_rect.x + 20, y + 2))
-            y += 26
+            if hasattr(item, 'quality'):
+                quality_color = QUALITY_COLORS.get(item.quality, WHITE)
+            else:
+                quality_color = WHITE
+            
+            prefix = '⚔️ ' if hasattr(item, 'slot') else '🧪 ' if hasattr(item, 'potion_type') else '📜 ' if hasattr(item, 'scroll_type') else '💰 '
+            item_text = FONT_SMALL.render(f'{prefix}{item.name}', True, quality_color)
+            self.screen.blit(item_text, (items_panel_rect.x + 15, y_item + 3))
+            
+            if hasattr(item, 'get_power'):
+                power_text = FONT_SMALL.render(f'{item.get_power()}', True, YELLOW)
+                self.screen.blit(power_text, (items_panel_rect.x + 340, y_item + 3))
+            
+            y_item += 26
         
-        if self.player.inventory and 0 <= self.inventory_selection < len(self.player.inventory):
-            detail_rect = pygame.Rect(panel_rect.x + 490, 150, 290, 400)
-            pygame.draw.rect(self.screen, (25, 25, 35), detail_rect)
-            pygame.draw.rect(self.screen, (60, 60, 80), detail_rect, 2)
+        detail_panel_rect = pygame.Rect(panel_rect.x + 720, 110, 260, 500)
+        pygame.draw.rect(self.screen, (20, 20, 30), detail_panel_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), detail_panel_rect, 2)
+        
+        if display_items and 0 <= self.inventory_selection < len(display_items):
+            selected = display_items[self.inventory_selection]
             
-            selected = self.player.inventory[self.inventory_selection]
+            name_color = QUALITY_COLORS.get(selected.quality, GOLD) if hasattr(selected, 'quality') else GOLD
+            name_text = FONT_NORMAL.render(selected.name, True, name_color)
+            self.screen.blit(name_text, (detail_panel_rect.x + 15, detail_panel_rect.y + 15))
             
-            name_text = FONT_NORMAL.render(selected.name, True, GOLD)
-            self.screen.blit(name_text, (detail_rect.x + 15, 165))
+            y_detail = detail_panel_rect.y + 45
             
-            y = 200
+            if hasattr(selected, 'quality'):
+                quality_text = FONT_SMALL.render(f'品质: {QUALITY_NAMES[selected.quality]}', True, quality_color)
+                self.screen.blit(quality_text, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 22
+            
             if hasattr(selected, 'slot'):
-                slot_names = {
-                    'weapon': '武器',
-                    'armor': '盔甲',
-                    'helmet': '头盔',
-                    'boots': '靴子',
-                    'accessory': '饰品'
-                }
-                type_text = FONT_SMALL.render(f'类型: {slot_names.get(selected.slot, "其他")}', True, WHITE)
-                self.screen.blit(type_text, (detail_rect.x + 15, y))
-                y += 25
-                
-                if hasattr(selected, 'stats'):
-                    for stat, value in selected.stats.items():
-                        stat_names = {
-                            'damage': '伤害',
-                            'defense': '防御',
-                            'hp': '生命',
-                            'mp': '魔力',
-                            'str': '力量',
-                            'dex': '敏捷',
-                            'int': '智力'
-                        }
-                        stat_name = stat_names.get(stat, stat)
-                        stat_text = FONT_SMALL.render(f'{stat_name}: +{value}', True, GREEN)
-                        self.screen.blit(stat_text, (detail_rect.x + 15, y))
-                        y += 22
+                type_text = FONT_SMALL.render(f'部位: {SLOT_NAMES.get(selected.slot, "其他")}', True, WHITE)
+                self.screen.blit(type_text, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 22
+            
+            if hasattr(selected, 'enhance_level') and selected.enhance_level > 0:
+                enhance_text = FONT_SMALL.render(f'强化: +{selected.enhance_level}', True, YELLOW)
+                self.screen.blit(enhance_text, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 22
+            
+            if hasattr(selected, 'base_stats') and selected.base_stats:
+                y_detail += 5
+                stat_title = FONT_SMALL.render('基础属性:', True, CYAN)
+                self.screen.blit(stat_title, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 18
+                for stat, value in selected.base_stats.items():
+                    stat_name = BASE_STAT_NAMES.get(stat, stat)
+                    stat_text = FONT_SMALL.render(f'  +{value} {stat_name}', True, GREEN)
+                    self.screen.blit(stat_text, (detail_panel_rect.x + 15, y_detail))
+                    y_detail += 16
+            
+            if hasattr(selected, 'sub_stats') and selected.sub_stats:
+                y_detail += 5
+                sub_stat_title = FONT_SMALL.render('副词条:', True, (200, 150, 255))
+                self.screen.blit(sub_stat_title, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 18
+                for stat, value in selected.sub_stats.items():
+                    stat_name = SUB_STAT_NAMES.get(stat, stat)
+                    stat_text = FONT_SMALL.render(f'  +{value}% {stat_name}', True, (180, 220, 255))
+                    self.screen.blit(stat_text, (detail_panel_rect.x + 15, y_detail))
+                    y_detail += 16
+            
+            if hasattr(selected, 'element_enchant') and selected.element_enchant:
+                y_detail += 5
+                element_color = ELEMENT_COLORS[selected.element_enchant]
+                element_text = FONT_SMALL.render(f'附魔: +{selected.element_damage} {ELEMENT_NAMES[selected.element_enchant]}伤害', True, element_color)
+                self.screen.blit(element_text, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 18
+            
+            if hasattr(selected, 'rune_slots') and selected.rune_slots > 0:
+                y_detail += 5
+                rune_title = FONT_SMALL.render(f'符文槽 ({selected.rune_slots}):', True, (255, 200, 100))
+                self.screen.blit(rune_title, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 18
+                for i, rune in enumerate(selected.runes):
+                    if rune:
+                        rune_text = FONT_SMALL.render(f'  [{i+1}] {RUNE_NAMES[rune]}', True, (255, 220, 150))
+                    else:
+                        rune_text = FONT_SMALL.render(f'  [{i+1}] 空槽', True, GRAY)
+                    self.screen.blit(rune_text, (detail_panel_rect.x + 15, y_detail))
+                    y_detail += 16
+            
+            if hasattr(selected, 'set_name') and selected.set_name:
+                y_detail += 5
+                set_text = FONT_SMALL.render(f'📦 {selected.set_name}', True, (200, 100, 255))
+                self.screen.blit(set_text, (detail_panel_rect.x + 15, y_detail))
+                y_detail += 18
             
             value_text = FONT_SMALL.render(f'价值: {selected.value} 金币', True, GRAY)
-            self.screen.blit(value_text, (detail_rect.x + 15, y + 10))
+            self.screen.blit(value_text, (detail_panel_rect.x + 15, detail_panel_rect.y + 470))
         
-        help_bg = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 760, 45)
+        help_bg = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 55, 960, 40)
         pygame.draw.rect(self.screen, (25, 25, 35), help_bg)
         
         help_lines = [
-            '↑↓: 选择物品 | E: 装备 | U: 使用 | ESC: 关闭背包'
+            '↑↓:选择 | E:装备 | U:脱下全部 | D:分解 | R:批量分解白装 | ESC:关闭'
         ]
-        y = help_bg.y + 8
-        for line in help_lines:
-            help_text = FONT_NORMAL.render(line, True, GRAY)
-            self.screen.blit(help_text, (help_bg.x + 20, y))
-            y += 18
+        help_text = FONT_NORMAL.render(help_lines[0], True, GRAY)
+        help_rect = help_text.get_rect(center=help_bg.center)
+        self.screen.blit(help_text, help_rect)
     
     def render_shop(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1299,38 +1424,62 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_inventory_input(self, event):
-        if not self.player.inventory:
+        display_items = self.player.get_sorted_inventory()
+        
+        if not display_items:
             self.inventory_selection = 0
             if event.key == pygame.K_ESCAPE:
                 self.state = GameState.PLAYING
             return
         
-        self.inventory_selection = max(0, min(self.inventory_selection, len(self.player.inventory) - 1))
+        self.inventory_selection = max(0, min(self.inventory_selection, len(display_items) - 1))
         
         if event.key in [pygame.K_UP, pygame.K_w]:
             if self.inventory_selection > 0:
                 self.inventory_selection -= 1
         elif event.key in [pygame.K_DOWN, pygame.K_s]:
-            if self.inventory_selection < len(self.player.inventory) - 1:
+            if self.inventory_selection < len(display_items) - 1:
                 self.inventory_selection += 1
         elif event.key in [pygame.K_e]:
-            if 0 <= self.inventory_selection < len(self.player.inventory):
-                item = self.player.inventory[self.inventory_selection]
+            if 0 <= self.inventory_selection < len(display_items):
+                item = display_items[self.inventory_selection]
                 if hasattr(item, 'slot'):
                     if self.player.equip_item(item):
-                        self.add_message(f'装备了 {item.name}！')
+                        self.add_message(f'✨ 装备了 {item.name}！')
                     else:
                         self.add_message(f'无法装备 {item.name}！')
                 else:
                     self.add_message('这个物品无法装备！')
         elif event.key in [pygame.K_u]:
-            if 0 <= self.inventory_selection < len(self.player.inventory):
-                item = self.player.inventory[self.inventory_selection]
+            unequipped = self.player.unequip_all()
+            if unequipped:
+                self.add_message(f'📤 已脱下 {len(unequipped)} 件装备！')
+            else:
+                self.add_message('没有可脱下的装备或背包已满！')
+        elif event.key in [pygame.K_d]:
+            if 0 <= self.inventory_selection < len(display_items):
+                item = display_items[self.inventory_selection]
+                if hasattr(item, 'item_type') and item.item_type == 'equipment':
+                    materials = self.player.decompose_equipment(item)
+                    self.add_message(f'🔨 分解了 {item.name}，获得 {materials} 个强化材料！')
+                    self.inventory_selection = min(self.inventory_selection, len(self.player.get_sorted_inventory()) - 1)
+                else:
+                    self.add_message('只能分解装备！')
+        elif event.key in [pygame.K_r]:
+            materials = self.player.bulk_decompose('common')
+            if materials > 0:
+                self.add_message(f'🔨 批量分解完成，获得 {materials} 个强化材料！')
+            else:
+                self.add_message('没有可分解的白装！')
+            self.inventory_selection = 0
+        elif event.key in [pygame.K_SPACE]:
+            if 0 <= self.inventory_selection < len(display_items):
+                item = display_items[self.inventory_selection]
                 if hasattr(item, 'use'):
                     msg = item.use(self.player)
                     self.add_message(msg)
                     self.player.remove_item(item)
-                    self.inventory_selection = min(self.inventory_selection, len(self.player.inventory) - 1)
+                    self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
                 else:
                     self.add_message('这个物品无法使用！')
         elif event.key == pygame.K_ESCAPE:
