@@ -21,6 +21,7 @@ class GameState:
     LEADERBOARD = 'leaderboard'
     CLASS_SELECT = 'class_select'
     TALENT = 'talent'
+    MODE_SELECT = 'mode_select'
 
 class Game:
     def __init__(self):
@@ -39,8 +40,10 @@ class Game:
         self.player_renderer = PlayerRenderer()
         
         self.state = GameState.MENU
+        self.game_mode = 'single'
         self.floor = 1
         self.player = None
+        self.player2 = None
         self.game_map = None
         self.entities = []
         self.monsters = []
@@ -77,16 +80,22 @@ class Game:
         self.items = []
         self.used_rooms = set()
         
+        monster_multiplier = 1.5 if self.game_mode == 'coop' else 1.0
+        
         if self.game_map.rooms:
             start_room = self.game_map.rooms[0]
-            self.player.x, self.player.y = start_room.center()
+            cx, cy = start_room.center()
+            self.player.x, self.player.y = cx, cy
+            if self.game_mode == 'coop' and self.player2:
+                self.player2.x, self.player2.y = cx + 1, cy
         
         for room in self.game_map.rooms:
             room_color = self.get_room_color(room.room_type)
             self.room_colors[(room.x1, room.y1, room.x2, room.y2)] = room_color
             
             if room.room_type == 'normal':
-                num_monsters = random.randint(2, 4)
+                base_monsters = random.randint(2, 4)
+                num_monsters = int(base_monsters * monster_multiplier)
                 for _ in range(num_monsters):
                     x, y = room.get_random_position()
                     if not any(m.x == x and m.y == y for m in self.monsters):
@@ -105,6 +114,9 @@ class Game:
                         x, y = room.get_random_position()
                         elite = create_elite(x, y, self.floor)
                         self.monsters.append(elite)
+                        if self.game_mode == 'coop' and random.random() < 0.5:
+                            elite2 = create_elite(x + 2, y, self.floor)
+                            self.monsters.append(elite2)
         
         for room in self.game_map.rooms:
             if room.room_type != 'boss' and random.random() < 0.3:
@@ -112,10 +124,13 @@ class Game:
                 if not any(e.x == x and e.y == y for e in self.monsters + self.items):
                     item_type = random.choice(['gold', 'potion', 'equipment'])
                     if item_type == 'gold':
-                        self.items.append(Gold(x, y, random.randint(10, 50) * self.floor))
+                        amount = int(random.randint(10, 50) * self.floor * (1.2 if self.game_mode == 'coop' else 1))
+                        self.items.append(Gold(x, y, amount))
                     elif item_type == 'potion':
                         potion_type = random.choice(['health', 'mana'])
                         self.items.append(Potion(x, y, potion_type))
+                        if self.game_mode == 'coop':
+                            self.items.append(Potion(x + 1, y, potion_type))
                     else:
                         item = create_random_item(x, y, self.floor)
                         if item:
@@ -135,14 +150,47 @@ class Game:
         }
         return colors.get(room_type, (80, 60, 40))
     
-    def new_game(self, class_type):
-        self.player = Character(MAP_WIDTH // 2, MAP_HEIGHT // 2, '勇者', class_type)
+    def new_game(self, class_type, class_type2=None):
+        self.player = Character(MAP_WIDTH // 2, MAP_HEIGHT // 2, '勇者1', class_type)
+        self.player2 = None
+        if self.game_mode == 'coop' and class_type2:
+            self.player2 = Character(MAP_WIDTH // 2 + 1, MAP_HEIGHT // 2, '勇者2', class_type2)
         self.floor = 1
         self.turn = 0
         self.message_log = []
         self.generate_floor()
         self.state = GameState.PLAYING
-        self.add_message('欢迎来到地牢！')
+        if self.game_mode == 'coop':
+            self.add_message('双人模式开始！并肩作战吧！')
+        else:
+            self.add_message('欢迎来到地牢！')
+    
+    def get_nearest_monster(self, player):
+        nearest = None
+        min_dist = 999
+        for monster in self.monsters:
+            if monster.is_alive():
+                dist = monster.get_distance_to(player)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest = monster
+        return nearest
+    
+    def use_player_skill(self, player, skill_type, allies=None):
+        target = self.get_nearest_monster(player)
+        all_enemies = [m for m in self.monsters if m.is_alive()]
+        
+        if skill_type == 'basic':
+            success = self.combat.use_basic_skill(player, target, all_enemies, allies)
+        else:
+            success = self.combat.use_ultimate_skill(player, target, all_enemies, allies)
+        
+        if success:
+            for msg in self.combat.log[-3:]:
+                self.add_message(msg)
+            self.monsters = [m for m in self.monsters if m.is_alive()]
+        
+        return success
     
     def go_downstairs(self):
         if self.floor >= MAX_FLOOR:
@@ -152,57 +200,60 @@ class Game:
             self.generate_floor()
             self.add_message(f'进入了第 {self.floor} 层！')
     
-    def move_player(self, dx, dy):
+    def move_single_player(self, player, dx, dy, player_num=1):
         if not self.player_turn:
-            return
+            return False
         
-        if self.player.has_status('stunned'):
-            self.add_message('你被眩晕了，无法移动！')
-            self.end_player_turn()
-            return
+        if player.has_status('stunned') or player.has_status('frozen'):
+            self.add_message(f'{player.name}被控制了，无法移动！')
+            return False
         
-        new_x = self.player.x + dx
-        new_y = self.player.y + dy
+        new_x = player.x + dx
+        new_y = player.y + dy
+        
+        other_player = self.player2 if player_num == 1 else self.player
+        if other_player and other_player.x == new_x and other_player.y == new_y:
+            return False
         
         for monster in self.monsters:
             if monster.x == new_x and monster.y == new_y:
-                attack_count = self.player.get_total_attack_count()
+                attack_count = player.get_total_attack_count()
                 for i in range(attack_count):
                     if monster.is_alive():
-                        self.combat.attack(self.player, monster)
-                if not monster.is_alive():
+                        self.combat.attack(player, monster)
+                if not monster.is_alive() and monster in self.monsters:
                     self.monsters.remove(monster)
-                self.end_player_turn()
-                return
+                return True
         
         for item in self.items[:]:
             if item.x == new_x and item.y == new_y:
                 if hasattr(item, 'is_open') and not item.is_open:
-                    msg = item.open(self.player)
+                    msg = item.open(player)
                     self.add_message(msg)
                     self.items.remove(item)
                 elif hasattr(item, 'amount'):
-                    self.player.gold += item.amount
+                    player.gold += item.amount
                     self.items.remove(item)
-                    self.add_message(f'拾取了 {item.amount} 金币！')
+                    self.add_message(f'{player.name}拾取了 {item.amount} 金币！')
                 else:
-                    if self.player.add_item(item):
+                    if player.add_item(item):
                         self.items.remove(item)
-                        self.add_message(f'拾取了 {item.name}！')
+                        self.add_message(f'{player.name}拾取了 {item.name}！')
         
         if 0 <= new_x < MAP_WIDTH and 0 <= new_y < MAP_HEIGHT:
             if self.game_map.tiles[new_x][new_y] == 0:
-                self.player.move(dx, dy)
-                self.game_map.add_to_path(self.player.x, self.player.y)
+                player.move(dx, dy)
+                self.game_map.add_to_path(player.x, player.y)
                 
-                affected, msg = self.game_map.apply_terrain_effect(self.player, self.player.x, self.player.y)
+                affected, msg = self.game_map.apply_terrain_effect(player, player.x, player.y)
                 if affected and msg:
                     self.add_message(msg)
                 
-                self.game_map.update_fov(self.player.x, self.player.y, 15)
-                self.update_camera()
+                if player_num == 1:
+                    self.game_map.update_fov(player.x, player.y, 15)
+                    self.update_camera()
         
-        room = self.game_map.get_room_at(self.player.x, self.player.y)
+        room = self.game_map.get_room_at(player.x, player.y)
         current_room_type = room.room_type if room else None
         
         if current_room_type == 'shop' and self.last_room_type != 'shop':
@@ -211,71 +262,147 @@ class Game:
             self.add_message('欢迎来到商店！')
         elif current_room_type == 'rest' and self.last_room_type != 'rest':
             self.add_message('休息点！按 E 键恢复生命和魔力。')
-        elif current_room_type == 'altar' and self.last_room_type != 'altar':
-            self.add_message('你发现了一座神秘的祭坛！按 E 键献祭生命获得强化。')
-        elif current_room_type == 'blacksmith' and self.last_room_type != 'blacksmith':
-            self.add_message('你找到了铁匠铺！按 E 键强化攻击。')
-        elif current_room_type == 'library' and self.last_room_type != 'library':
-            self.add_message('古老的图书馆！按 E 键阅读获得永久属性加成。')
-        elif current_room_type == 'event' and self.last_room_type != 'event':
-            self.add_message('神秘的事件房间！按 E 键触发随机事件。')
         
         self.last_room_type = current_room_type
         
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
-            if self.player.x == sx and self.player.y == sy:
+            if player.x == sx and player.y == sy:
                 self.go_downstairs()
         
-        self.end_player_turn()
+        return True
+    
+    def move_player(self, dx, dy):
+        moved = self.move_single_player(self.player, dx, dy, 1)
+        if moved:
+            self.end_player_turn()
+    
+    def move_player2(self, dx, dy):
+        if self.game_mode != 'coop' or not self.player2:
+            return
+        moved = self.move_single_player(self.player2, dx, dy, 2)
+        if moved:
+            self.end_player_turn()
     
     def end_player_turn(self):
         self.player_turn = False
         self.turn += 1
         
-        status_messages = self.player.update_status_effects()
-        for msg in status_messages:
-            self.add_message(msg)
+        all_players = [self.player]
+        if self.game_mode == 'coop' and self.player2:
+            all_players.append(self.player2)
         
-        self.player.apply_passive_effects()
+        for player in all_players:
+            status_messages = player.update_status_effects()
+            for msg in status_messages:
+                self.add_message(msg)
+            player.apply_passive_effects()
+            player.update_skill_cooldowns()
+            player.update_buff_durations()
+        
+        targets = all_players
         
         for monster in self.monsters:
             if monster.is_alive():
                 monster.update_status_effects()
-                monster.update_ai(self.game_map, self.player, self.monsters + [self.player])
                 
-                distance = monster.get_distance_to(self.player)
-                if distance <= 1.5 and monster.attack_cooldown <= 0:
-                    attack_count = 1 if random.random() < 0.7 else 2
-                    for _ in range(attack_count):
-                        if self.player.hp > 0:
-                            self.combat.attack(monster, self.player)
-                    monster.attack_cooldown = 2
-                elif monster.attack_cooldown > 0:
-                    monster.attack_cooldown -= 1
+                nearest_player = min(targets, key=lambda p: monster.get_distance_to(p))
+                monster.update_ai(self.game_map, nearest_player, self.monsters + targets)
+                
+                for target in targets:
+                    distance = monster.get_distance_to(target)
+                    if distance <= 1.5 and monster.attack_cooldown <= 0:
+                        attack_count = 1 if random.random() < 0.7 else 2
+                        for _ in range(attack_count):
+                            if target.hp > 0:
+                                self.combat.attack(monster, target)
+                        monster.attack_cooldown = 2
+                        break
+                else:
+                    if monster.attack_cooldown > 0:
+                        monster.attack_cooldown -= 1
                 
                 self.game_map.apply_terrain_effect(monster, monster.x, monster.y)
         
-        if self.player.hp <= 0:
+        all_dead = True
+        for player in all_players:
+            if player.hp > 0:
+                all_dead = False
+                break
+        if all_dead:
             self.game_over()
         
-        for buff in self.player.buffs[:]:
-            buff['duration'] -= 1
-            if buff['duration'] <= 0:
-                if buff['type'] == 'strength':
-                    self.player.str -= buff['value']
-                elif buff['type'] == 'dexterity':
-                    self.player.dex -= buff['value']
-                self.player.buffs.remove(buff)
+        for player in all_players:
+            for buff in player.buffs[:]:
+                buff['duration'] -= 1
+                if buff['duration'] <= 0:
+                    if buff['type'] == 'strength':
+                        player.str -= buff['value']
+                    elif buff['type'] == 'dexterity':
+                        player.dex -= buff['value']
+                    player.buffs.remove(buff)
         
         self.combat.update()
         
-        if self.player.level_up_animation > 0:
-            self.player.level_up_animation -= 1
-            if self.player.level_up_animation <= 0:
-                self.player.is_leveling_up = False
+        all_players = [self.player]
+        if self.game_mode == 'coop' and self.player2:
+            all_players.append(self.player2)
+        
+        for player in all_players:
+            if player.level_up_animation > 0:
+                player.level_up_animation -= 1
+                if player.level_up_animation <= 0:
+                    player.is_leveling_up = False
         
         self.player_turn = True
+    
+    def render_player_status(self, player, x, y, label=None):
+        status_rect = pygame.Rect(x, y, 300, 90)
+        self.draw_transparent_rect(status_rect, (25, 25, 38))
+        self.draw_transparent_border(status_rect, (80, 80, 100))
+        
+        class_name = CLASSES[player.class_type]['name']
+        title_text = FONT_LARGE.render(f'{class_name}', True, GOLD)
+        title_text.set_alpha(UI_ALPHA)
+        level_text = FONT_NORMAL.render(f'Lv.{player.level}', True, WHITE)
+        level_text.set_alpha(UI_ALPHA)
+        
+        if label:
+            label_text = FONT_NORMAL.render(label, True, CYAN)
+            label_text.set_alpha(UI_ALPHA)
+            label_rect = label_text.get_rect(center=(status_rect.x + 25, status_rect.y + 20))
+            self.screen.blit(label_text, label_rect)
+            title_rect = title_text.get_rect(center=(status_rect.centerx + 15, status_rect.y + 20))
+        else:
+            title_rect = title_text.get_rect(center=(status_rect.centerx, status_rect.y + 20))
+        level_rect = level_text.get_rect(center=(status_rect.centerx + 100, status_rect.y + 25))
+        self.screen.blit(title_text, title_rect)
+        self.screen.blit(level_text, level_rect)
+        
+        bar_width = 260
+        bar_x = status_rect.centerx - bar_width // 2
+        
+        y_pos = status_rect.y + 48
+        max_hp = player.get_total_max_hp()
+        hp_ratio = max(0, player.hp / max_hp)
+        pygame.draw.rect(self.screen, (80, 0, 0), (bar_x, y_pos, bar_width, 16))
+        pygame.draw.rect(self.screen, (220, 50, 50), (bar_x, y_pos, int(bar_width * hp_ratio), 16))
+        pygame.draw.rect(self.screen, (255, 100, 100), (bar_x, y_pos, int(bar_width * hp_ratio), 5))
+        hp_text = FONT_SMALL.render(f'❤️ {player.hp}/{max_hp}', True, WHITE)
+        hp_text.set_alpha(UI_ALPHA)
+        hp_text_rect = hp_text.get_rect(center=(bar_x + bar_width // 2, y_pos + 8))
+        self.screen.blit(hp_text, hp_text_rect)
+        
+        y_pos += 18
+        max_mp = player.get_total_max_mp()
+        mp_ratio = max(0, player.mp / max_mp)
+        pygame.draw.rect(self.screen, (0, 0, 80), (bar_x, y_pos, bar_width, 16))
+        pygame.draw.rect(self.screen, (50, 100, 220), (bar_x, y_pos, int(bar_width * mp_ratio), 16))
+        pygame.draw.rect(self.screen, (100, 150, 255), (bar_x, y_pos, int(bar_width * mp_ratio), 5))
+        mp_text = FONT_SMALL.render(f'💧 {player.mp}/{max_mp}', True, WHITE)
+        mp_text.set_alpha(UI_ALPHA)
+        mp_text_rect = mp_text.get_rect(center=(bar_x + bar_width // 2, y_pos + 8))
+        self.screen.blit(mp_text, mp_text_rect)
     
     def update_camera(self):
         target_x = self.player.x * TILE_SIZE - SCREEN_WIDTH // 2
@@ -292,6 +419,8 @@ class Game:
         
         if self.state == GameState.MENU:
             self.render_menu()
+        elif self.state == GameState.MODE_SELECT:
+            self.render_mode_select()
         elif self.state == GameState.CLASS_SELECT:
             self.render_class_select()
         elif self.state in [GameState.PLAYING, GameState.PAUSED, GameState.INVENTORY, GameState.SHOP, GameState.TALENT]:
@@ -312,6 +441,42 @@ class Game:
             self.render_leaderboard()
         
         pygame.display.flip()
+    
+    def render_mode_select(self):
+        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 80, 600, 100)
+        pygame.draw.rect(self.screen, (40, 40, 60), title_bg)
+        pygame.draw.rect(self.screen, GOLD, title_bg, 3)
+        
+        title = FONT_LARGE.render('选择游戏模式', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 130))
+        self.screen.blit(title, title_rect)
+        
+        mode_items = ['单人模式', '双人模式 (Co-op)']
+        mode_descriptions = ['独自冒险探索地牢', '与朋友并肩作战，怪物更多！']
+        for i, (item, desc) in enumerate(zip(mode_items, mode_descriptions)):
+            y = 280 + i * 100
+            item_rect = pygame.Rect(SCREEN_WIDTH // 2 - 250, y, 500, 80)
+            
+            if i == self.menu_selection:
+                pygame.draw.rect(self.screen, (60, 70, 90), item_rect)
+                pygame.draw.rect(self.screen, GOLD, item_rect, 3)
+                color = YELLOW
+            else:
+                pygame.draw.rect(self.screen, (35, 35, 50), item_rect)
+                pygame.draw.rect(self.screen, (70, 70, 90), item_rect, 2)
+                color = WHITE
+            
+            text = FONT_LARGE.render(item, True, color)
+            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, y + 30))
+            self.screen.blit(text, text_rect)
+            
+            desc_text = FONT_SMALL.render(desc, True, GRAY)
+            desc_rect = desc_text.get_rect(center=(SCREEN_WIDTH // 2, y + 58))
+            self.screen.blit(desc_text, desc_rect)
+        
+        footer_text = FONT_SMALL.render('使用方向键选择，按回车确认，ESC返回', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        self.screen.blit(footer_text, footer_rect)
     
     def render_game(self):
         start_x = max(0, int(self.camera_x // TILE_SIZE) - 1)
@@ -367,15 +532,34 @@ class Game:
                     else:
                         self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
         
+        for effect in self.combat.skill_effects:
+            self.player_renderer.skill_effect_renderer.draw_skill_effect(self.screen, effect, self.camera_x, self.camera_y)
+        
         class_name = CLASSES[self.player.class_type]['name']
-        if class_name == '战士':
-            self.player_renderer.draw_warrior(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-        elif class_name == '法师':
-            self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-        elif class_name == '盗贼':
-            self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-        elif class_name == '圣骑士':
-            self.player_renderer.draw_paladin(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        if not (hasattr(self.player, 'is_invisible') and self.player.is_invisible):
+            if class_name == '战士':
+                self.player_renderer.draw_warrior(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+            elif class_name == '法师':
+                self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+            elif class_name == '盗贼':
+                self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+            elif class_name == '圣骑士':
+                self.player_renderer.draw_paladin(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        
+        if self.game_mode == 'coop' and self.player2:
+            if self.game_map.explored[self.player2.x][self.player2.y] and self.game_map.visible[self.player2.x][self.player2.y]:
+                class_name2 = CLASSES[self.player2.class_type]['name']
+                if not (hasattr(self.player2, 'is_invisible') and self.player2.is_invisible):
+                    if class_name2 == '战士':
+                        self.player_renderer.draw_warrior(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                    elif class_name2 == '法师':
+                        self.player_renderer.draw_mage(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                    elif class_name2 == '盗贼':
+                        self.player_renderer.draw_rogue(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                    elif class_name2 == '圣骑士':
+                        self.player_renderer.draw_paladin(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+        
+        self.player_renderer.skill_effect_renderer.draw_damage_numbers(self.screen, self.combat.damage_numbers, self.camera_x, self.camera_y)
         
         if self.player.is_leveling_up:
             px = self.player.x * TILE_SIZE - int(self.camera_x) + TILE_SIZE // 2
@@ -396,75 +580,97 @@ class Game:
         
         self.render_ui()
     
+    def draw_transparent_rect(self, rect, color, alpha=UI_ALPHA):
+        surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        surf.fill((color[0], color[1], color[2], alpha))
+        self.screen.blit(surf, (rect.x, rect.y))
+    
+    def draw_transparent_border(self, rect, color, alpha=UI_ALPHA, border_width=2):
+        surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (color[0], color[1], color[2], alpha), (0, 0, rect.width, rect.height), border_width)
+        self.screen.blit(surf, (rect.x, rect.y))
+    
     def render_ui(self):
-        top_left_log_rect = pygame.Rect(10, 10, 350, 200)
-        pygame.draw.rect(self.screen, (20, 20, 30), top_left_log_rect)
-        pygame.draw.rect(self.screen, (50, 50, 70), top_left_log_rect, 2)
+        top_left_log_rect = pygame.Rect(10, 10, 350, 180)
+        self.draw_transparent_rect(top_left_log_rect, (20, 20, 30))
+        self.draw_transparent_border(top_left_log_rect, (80, 80, 100))
         
         log_title = FONT_NORMAL.render('📜 战斗日志', True, GOLD)
+        log_title.set_alpha(UI_ALPHA)
         self.screen.blit(log_title, (top_left_log_rect.x + 10, top_left_log_rect.y + 8))
         
         y_log = top_left_log_rect.y + 35
-        for msg in self.message_log[-8:]:
+        for msg in self.message_log[-6:]:
             msg_text = FONT_SMALL.render(msg, True, (200, 200, 220))
+            msg_text.set_alpha(UI_ALPHA)
             self.screen.blit(msg_text, (top_left_log_rect.x + 12, y_log))
-            y_log += 20
+            y_log += 22
         
-        key_hints_rect = pygame.Rect(10, 220, 350, 60)
-        pygame.draw.rect(self.screen, (20, 20, 30), key_hints_rect)
-        pygame.draw.rect(self.screen, (50, 50, 70), key_hints_rect, 2)
+        skill_panel_rect = pygame.Rect(10, 200, 350, 100)
+        self.draw_transparent_rect(skill_panel_rect, (20, 20, 30))
+        self.draw_transparent_border(skill_panel_rect, (80, 80, 100))
         
-        hint_lines = [
-            '方向键/WASD:移动 | 空格:攻击 | E:交互',
-            'I:背包 | T:天赋 | ESC:暂停'
-        ]
+        skill_data = SKILLS[self.player.class_type]
+        basic_skill = skill_data['basic']
+        ultimate_skill = skill_data['ultimate']
+        
+        basic_cd = self.player.skill_cooldowns.get('basic', 0)
+        ult_cd = self.player.skill_cooldowns.get('ultimate', 0)
+        
+        basic_color = WHITE if basic_cd <= 0 else GRAY
+        ult_color = WHITE if ult_cd <= 0 else GRAY
+        
+        basic_text = FONT_SMALL.render(f'[Q] {basic_skill["name"]}', True, basic_color)
+        basic_text.set_alpha(UI_ALPHA)
+        self.screen.blit(basic_text, (skill_panel_rect.x + 10, skill_panel_rect.y + 10))
+        
+        basic_cd_text = FONT_SMALL.render(f'CD: {basic_cd} | MP:{basic_skill["mp_cost"]}', True, (150, 150, 180))
+        basic_cd_text.set_alpha(UI_ALPHA)
+        self.screen.blit(basic_cd_text, (skill_panel_rect.x + 10, skill_panel_rect.y + 35))
+        
+        ult_text = FONT_SMALL.render(f'[R] {ultimate_skill["name"]}', True, ult_color)
+        ult_text.set_alpha(UI_ALPHA)
+        self.screen.blit(ult_text, (skill_panel_rect.x + 180, skill_panel_rect.y + 10))
+        
+        ult_cd_text = FONT_SMALL.render(f'CD: {ult_cd} | MP:{ultimate_skill["mp_cost"]}', True, (150, 150, 180))
+        ult_cd_text.set_alpha(UI_ALPHA)
+        self.screen.blit(ult_cd_text, (skill_panel_rect.x + 180, skill_panel_rect.y + 35))
+        
+        key_hints_rect = pygame.Rect(10, 310, 350, 80)
+        self.draw_transparent_rect(key_hints_rect, (20, 20, 30))
+        self.draw_transparent_border(key_hints_rect, (80, 80, 100))
+        
+        if self.game_mode == 'coop':
+            hint_lines = [
+                'P1: WASD移动 | 空格攻击 | Q小技能 | R大招',
+                'P2: 小键盘8456移动 | 回车攻击 | 7小技能 | 9大招',
+                'E:交互 | I:背包 | T:天赋 | ESC:暂停'
+            ]
+        else:
+            hint_lines = [
+                'WASD/方向键:移动 | 空格:攻击 | E:交互',
+                'Q:小技能 | R:大招 | I:背包 | T:天赋 | ESC:暂停'
+            ]
         y_hint = key_hints_rect.y + 8
         for line in hint_lines:
             hint_text = FONT_SMALL.render(line, True, (150, 150, 180))
+            hint_text.set_alpha(UI_ALPHA)
             self.screen.blit(hint_text, (key_hints_rect.x + 10, y_hint))
             y_hint += 22
         
-        top_panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 300, 10, 600, 90)
-        pygame.draw.rect(self.screen, (30, 30, 40), top_panel_rect)
-        pygame.draw.rect(self.screen, (80, 80, 100), top_panel_rect, 2)
+        if self.game_mode == 'coop' and self.player2:
+            self.render_player_status(self.player, SCREEN_WIDTH // 2 - 310, 10, 'P1')
+            self.render_player_status(self.player2, SCREEN_WIDTH // 2 + 10, 10, 'P2')
+        else:
+            self.render_player_status(self.player, SCREEN_WIDTH // 2 - 250, 10)
         
-        class_name = CLASSES[self.player.class_type]['name']
-        title_text = FONT_LARGE.render(f'{class_name}', True, GOLD)
-        level_text = FONT_NORMAL.render(f'Lv.{self.player.level}', True, WHITE)
-        title_rect = title_text.get_rect(center=(top_panel_rect.centerx, top_panel_rect.y + 20))
-        level_rect = level_text.get_rect(center=(top_panel_rect.centerx + 100, top_panel_rect.y + 25))
-        self.screen.blit(title_text, title_rect)
-        self.screen.blit(level_text, level_rect)
-        
-        bar_width = 280
-        bar_x = top_panel_rect.centerx - bar_width // 2
-        
-        y = top_panel_rect.y + 48
-        max_hp = self.player.get_total_max_hp()
-        hp_ratio = self.player.hp / max_hp
-        pygame.draw.rect(self.screen, (80, 0, 0), (bar_x, y, bar_width, 16))
-        pygame.draw.rect(self.screen, (220, 50, 50), (bar_x, y, int(bar_width * hp_ratio), 16))
-        pygame.draw.rect(self.screen, (255, 100, 100), (bar_x, y, int(bar_width * hp_ratio), 5))
-        hp_text = FONT_SMALL.render(f'❤️ {self.player.hp}/{max_hp}', True, WHITE)
-        hp_text_rect = hp_text.get_rect(center=(bar_x + bar_width // 2, y + 8))
-        self.screen.blit(hp_text, hp_text_rect)
-        
-        y += 18
-        max_mp = self.player.get_total_max_mp()
-        mp_ratio = self.player.mp / max_mp
-        pygame.draw.rect(self.screen, (0, 0, 80), (bar_x, y, bar_width, 16))
-        pygame.draw.rect(self.screen, (50, 100, 220), (bar_x, y, int(bar_width * mp_ratio), 16))
-        pygame.draw.rect(self.screen, (100, 150, 255), (bar_x, y, int(bar_width * mp_ratio), 5))
-        mp_text = FONT_SMALL.render(f'💧 {self.player.mp}/{max_mp}', True, WHITE)
-        mp_text_rect = mp_text.get_rect(center=(bar_x + bar_width // 2, y + 8))
-        self.screen.blit(mp_text, mp_text_rect)
-        
-        left_panel_rect = pygame.Rect(10, 295, 200, 420)
-        pygame.draw.rect(self.screen, (30, 30, 40), left_panel_rect)
-        pygame.draw.rect(self.screen, (60, 60, 80), left_panel_rect, 2)
+        left_panel_rect = pygame.Rect(10, 400, 200, 350)
+        self.draw_transparent_rect(left_panel_rect, (25, 25, 38))
+        self.draw_transparent_border(left_panel_rect, (80, 80, 100))
         
         y = left_panel_rect.y + 12
         stats_title = FONT_NORMAL.render('📊 属性', True, GOLD)
+        stats_title.set_alpha(UI_ALPHA)
         self.screen.blit(stats_title, (left_panel_rect.x + 12, y))
         y += 28
         
@@ -472,46 +678,59 @@ class Game:
             f'⚔️ 物攻: {self.player.get_total_physical_attack()}',
             f'✨ 法攻: {self.player.get_total_magic_attack()}',
             f'🛡️ 物防: {self.player.get_total_physical_defense()}',
-            f'🔮 法防: {self.player.get_total_magic_defense()}',
             f'💪 力量: {self.player.get_total_str()}',
             f'🏃 敏捷: {self.player.get_total_dex()}',
             f'📖 智力: {self.player.get_total_int()}',
-            f'� 暴击: {self.player.get_total_critical_chance()}%',
+            f'🎯 暴击: {self.player.get_total_critical_chance()}%',
             f'⚡ 暴伤: {self.player.get_total_critical_damage()}%',
-            f'👻 闪避: {self.player.get_total_evasion()}%',
-            f'🛡️ 格挡: {self.player.get_total_block_rate()}%'
+            f'👻 闪避: {self.player.get_total_evasion()}%'
         ]
         for text in stats_text:
             stat_text = FONT_SMALL.render(text, True, (200, 200, 200))
+            stat_text.set_alpha(UI_ALPHA)
             self.screen.blit(stat_text, (left_panel_rect.x + 12, y))
-            y += 22
+            y += 24
         
         y += 8
         gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
+        gold_text.set_alpha(UI_ALPHA)
         self.screen.blit(gold_text, (left_panel_rect.x + 12, y))
         
-        if self.player.status_effects:
+        if self.player.shield > 0:
             y += 28
-            status_title = FONT_SMALL.render('状态效果:', True, GOLD)
+            shield_text = FONT_SMALL.render(f'🛡️ 护盾: {self.player.shield}', True, (100, 150, 255))
+            shield_text.set_alpha(UI_ALPHA)
+            self.screen.blit(shield_text, (left_panel_rect.x + 12, y))
+        
+        if hasattr(self.player, 'is_berserk') and self.player.is_berserk:
+            y += 24
+            berserk_text = FONT_SMALL.render(f'🔥 狂暴! ({self.player.berserk_duration})', True, (255, 100, 50))
+            berserk_text.set_alpha(UI_ALPHA)
+            self.screen.blit(berserk_text, (left_panel_rect.x + 12, y))
+        
+        if self.player.status_effects:
+            y += 24
+            status_title = FONT_SMALL.render('状态:', True, GOLD)
+            status_title.set_alpha(UI_ALPHA)
             self.screen.blit(status_title, (left_panel_rect.x + 12, y))
-            y += 18
-            for status in self.player.status_effects[:4]:
+            y += 20
+            for status in self.player.status_effects[:3]:
                 status_color = {
                     'poison': (100, 200, 100),
                     'burning': (255, 100, 50),
                     'frozen': (150, 200, 255),
                     'stunned': (200, 200, 100),
-                    'haste': (255, 255, 100),
-                    'shield': (100, 150, 255),
-                    'invisible': (200, 200, 255)
+                    'slowed': (150, 150, 200),
+                    'haste': (255, 255, 100)
                 }.get(status['type'], WHITE)
                 status_text = FONT_SMALL.render(f"  {status['type']} ({status['duration']})", True, status_color)
+                status_text.set_alpha(UI_ALPHA)
                 self.screen.blit(status_text, (left_panel_rect.x + 12, y))
-                y += 16
+                y += 18
         
-        right_panel_rect = pygame.Rect(SCREEN_WIDTH - 220, 10, 210, 400)
-        pygame.draw.rect(self.screen, (30, 30, 40), right_panel_rect)
-        pygame.draw.rect(self.screen, (60, 60, 80), right_panel_rect, 2)
+        right_panel_rect = pygame.Rect(SCREEN_WIDTH - 220, 10, 210, 380)
+        self.draw_transparent_rect(right_panel_rect, (25, 25, 38))
+        self.draw_transparent_border(right_panel_rect, (80, 80, 100))
         
         minimap_size = 190
         minimap_rect = pygame.Rect(right_panel_rect.x + 10, right_panel_rect.y + 10, minimap_size, minimap_size)
@@ -621,24 +840,31 @@ class Game:
         self.screen.blit(footer_text, footer_rect)
     
     def render_class_select(self):
-        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 40, 600, 80)
+        title_bg = pygame.Rect(SCREEN_WIDTH // 2 - 300, 30, 600, 70)
         pygame.draw.rect(self.screen, (40, 40, 60), title_bg)
         pygame.draw.rect(self.screen, GOLD, title_bg, 3)
         
-        title = FONT_LARGE.render('选择你的职业', True, GOLD)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 80))
+        if self.game_mode == 'coop':
+            if hasattr(self, 'selected_class1') and self.selected_class1:
+                p1_class = CLASSES[self.selected_class1]['name']
+                title = FONT_LARGE.render(f'玩家2选择职业 (P1: {p1_class})', True, GOLD)
+            else:
+                title = FONT_LARGE.render('玩家1选择职业', True, GOLD)
+        else:
+            title = FONT_LARGE.render('选择你的职业', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 65))
         self.screen.blit(title, title_rect)
         
         class_data = [
-            ('warrior', '战士', '血厚防高，近战强力', RED, ['HP: 150', 'MP: 30', '力量: 18', '防御: 15']),
-            ('mage', '法师', '远程魔法，伤害爆炸', BLUE, ['HP: 80', 'MP: 120', '智力: 20', '魔法伤害高']),
-            ('rogue', '盗贼', '敏捷灵活，背刺暴击', GREEN, ['HP: 100', 'MP: 50', '敏捷: 20', '闪避率高']),
-            ('paladin', '圣骑士', '能奶能抗，神圣光环', (255, 215, 0), ['HP: 130', 'MP: 80', '防御: 18', '神圣光环'])
+            ('warrior', '战士', '主打破甲近战爆发', RED, ['HP: 150', 'MP: 30', '小技能: 破甲猛击', '大招: 狂怒碎山斩']),
+            ('mage', '法师', '主打持续伤害群控', BLUE, ['HP: 80', 'MP: 120', '小技能: 烈焰弹', '大招: 陨星天火']),
+            ('rogue', '盗贼', '主打背刺高速偷袭', GREEN, ['HP: 100', 'MP: 50', '小技能: 暗影突袭', '大招: 影杀千刃']),
+            ('paladin', '圣骑士', '主打护盾续航治疗', (255, 215, 0), ['HP: 130', 'MP: 80', '小技能: 神圣庇护', '大招: 圣光审判'])
         ]
         
         for i, (key, name, desc, color, stats) in enumerate(class_data):
             x = 80 + i * 350
-            panel_rect = pygame.Rect(x, 150, 300, 420)
+            panel_rect = pygame.Rect(x, 120, 300, 480)
             
             if i == self.menu_selection:
                 bg_color = (50, 50, 70)
@@ -651,26 +877,32 @@ class Game:
             pygame.draw.rect(self.screen, border_color, panel_rect, 3)
             
             class_title = FONT_LARGE.render(name, True, color)
-            self.screen.blit(class_title, (x + 30, 170))
+            self.screen.blit(class_title, (x + 30, 140))
             
-            pygame.draw.circle(self.screen, color, (x + 150, 260), 40)
-            pygame.draw.circle(self.screen, WHITE, (x + 150, 260), 40, 3)
-            pygame.draw.circle(self.screen, WHITE, (x + 135, 250), 8)
-            pygame.draw.circle(self.screen, WHITE, (x + 165, 250), 8)
-            pygame.draw.circle(self.screen, BLACK, (x + 135, 250), 4)
-            pygame.draw.circle(self.screen, BLACK, (x + 165, 250), 4)
+            pygame.draw.circle(self.screen, color, (x + 150, 230), 40)
+            pygame.draw.circle(self.screen, WHITE, (x + 150, 230), 40, 3)
+            pygame.draw.circle(self.screen, WHITE, (x + 135, 220), 8)
+            pygame.draw.circle(self.screen, WHITE, (x + 165, 220), 8)
+            pygame.draw.circle(self.screen, BLACK, (x + 135, 220), 4)
+            pygame.draw.circle(self.screen, BLACK, (x + 165, 220), 4)
             
-            y = 320
+            y = 290
             for stat in stats:
                 stat_text = FONT_NORMAL.render(stat, True, WHITE)
                 self.screen.blit(stat_text, (x + 30, y))
                 y += 30
             
             desc_text = FONT_SMALL.render(desc, True, GRAY)
-            self.screen.blit(desc_text, (x + 30, y + 20))
+            self.screen.blit(desc_text, (x + 30, y + 10))
+            
+            skill_info = FONT_SMALL.render(f'Q:小技能 R:大招', True, (150, 200, 255))
+            self.screen.blit(skill_info, (x + 30, y + 35))
         
-        footer_text = FONT_NORMAL.render('按 ← → 选择职业，按回车键开始游戏', True, GRAY)
-        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        if self.game_mode == 'coop':
+            footer_text = FONT_NORMAL.render('按 ← → 选择，回车确认，ESC返回', True, GRAY)
+        else:
+            footer_text = FONT_NORMAL.render('按 ← → 选择职业，按回车键开始游戏', True, GRAY)
+        footer_rect = footer_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 40))
         self.screen.blit(footer_text, footer_rect)
     
     def render_pause_menu(self):
@@ -1208,6 +1440,8 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 if self.state == GameState.MENU:
                     self.handle_menu_input(event)
+                elif self.state == GameState.MODE_SELECT:
+                    self.handle_mode_select_input(event)
                 elif self.state == GameState.CLASS_SELECT:
                     self.handle_class_select_input(event)
                 elif self.state == GameState.PLAYING:
@@ -1284,7 +1518,7 @@ class Game:
             self.menu_selection = (self.menu_selection + 1) % 4
         elif event.key == pygame.K_RETURN:
             if self.menu_selection == 0:
-                self.state = GameState.CLASS_SELECT
+                self.state = GameState.MODE_SELECT
                 self.menu_selection = 0
             elif self.menu_selection == 1:
                 if self.save_manager.has_save():
@@ -1298,6 +1532,24 @@ class Game:
         elif event.key == pygame.K_ESCAPE:
             self.running = False
     
+    def handle_mode_select_input(self, event):
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.menu_selection = (self.menu_selection - 1) % 2
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+            self.menu_selection = (self.menu_selection + 1) % 2
+        elif event.key == pygame.K_RETURN:
+            if self.menu_selection == 0:
+                self.game_mode = 'single'
+                self.state = GameState.CLASS_SELECT
+                self.menu_selection = 0
+            elif self.menu_selection == 1:
+                self.game_mode = 'coop'
+                self.state = GameState.CLASS_SELECT
+                self.menu_selection = 0
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.MENU
+            self.menu_selection = 0
+    
     def handle_class_select_input(self, event):
         if event.key in [pygame.K_LEFT, pygame.K_a]:
             self.menu_selection = (self.menu_selection - 1) % 4
@@ -1305,11 +1557,29 @@ class Game:
             self.menu_selection = (self.menu_selection + 1) % 4
         elif event.key == pygame.K_RETURN:
             classes = list(CLASSES.keys())
-            self.new_game(classes[self.menu_selection])
+            if self.game_mode == 'single':
+                self.new_game(classes[self.menu_selection])
+            else:
+                if not hasattr(self, 'selected_class1') or self.selected_class1 is None:
+                    self.selected_class1 = classes[self.menu_selection]
+                    self.add_message(f'玩家1选择了{CLASSES[self.selected_class1]["name"]}')
+                    self.menu_selection = (self.menu_selection + 1) % 4
+                else:
+                    self.new_game(self.selected_class1, classes[self.menu_selection])
+                    self.selected_class1 = None
         elif event.key == pygame.K_ESCAPE:
-            self.state = GameState.MENU
+            if hasattr(self, 'selected_class1') and self.selected_class1 is not None:
+                self.selected_class1 = None
+                self.add_message('已取消玩家1选择')
+            else:
+                self.state = GameState.MODE_SELECT
+                self.menu_selection = 0
     
     def handle_game_input(self, event):
+        allies = [self.player]
+        if self.game_mode == 'coop' and self.player2:
+            allies.append(self.player2)
+        
         if event.key in [pygame.K_UP, pygame.K_w]:
             self.move_player(0, -1)
         elif event.key in [pygame.K_DOWN, pygame.K_s]:
@@ -1318,6 +1588,12 @@ class Game:
             self.move_player(-1, 0)
         elif event.key in [pygame.K_RIGHT, pygame.K_d]:
             self.move_player(1, 0)
+        elif event.key == pygame.K_q:
+            if self.use_player_skill(self.player, 'basic', allies):
+                self.end_player_turn()
+        elif event.key == pygame.K_r:
+            if self.use_player_skill(self.player, 'ultimate', allies):
+                self.end_player_turn()
         elif event.key == pygame.K_SPACE:
             for monster in self.monsters:
                 if monster.get_distance_to(self.player) <= 1.5:
@@ -1340,6 +1616,33 @@ class Game:
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PAUSED
             self.menu_selection = 0
+        
+        if self.game_mode == 'coop' and self.player2:
+            if event.key == pygame.K_KP8:
+                self.move_player2(0, -1)
+            elif event.key == pygame.K_KP5:
+                self.move_player2(0, 1)
+            elif event.key == pygame.K_KP4:
+                self.move_player2(-1, 0)
+            elif event.key == pygame.K_KP6:
+                self.move_player2(1, 0)
+            elif event.key == pygame.K_KP7:
+                if self.use_player_skill(self.player2, 'basic', allies):
+                    self.end_player_turn()
+            elif event.key == pygame.K_KP9:
+                if self.use_player_skill(self.player2, 'ultimate', allies):
+                    self.end_player_turn()
+            elif event.key == pygame.K_KP_ENTER:
+                for monster in self.monsters:
+                    if monster.get_distance_to(self.player2) <= 1.5:
+                        attack_count = self.player2.get_total_attack_count()
+                        for _ in range(attack_count):
+                            if monster.is_alive():
+                                self.combat.attack(self.player2, monster)
+                        if not monster.is_alive():
+                            self.monsters.remove(monster)
+                        self.end_player_turn()
+                        break
     
     def handle_special_room_interaction(self):
         room = self.game_map.get_room_at(self.player.x, self.player.y)

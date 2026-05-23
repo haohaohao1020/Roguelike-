@@ -77,6 +77,24 @@ class Character(Entity):
         self.skills = []
         self.buffs = []
         self.status_effects = []
+        self.skill_cooldowns = {'basic': 0, 'ultimate': 0}
+        self.shield = 0
+        self.shield_duration = 0
+        self.is_berserk = False
+        self.berserk_duration = 0
+        self.is_invisible = False
+        self.invisible_duration = 0
+        self.speed_bonus = 0
+        self.speed_bonus_duration = 0
+        self.crit_damage_bonus = 0
+        self.crit_damage_bonus_duration = 0
+        self.evasion_bonus = 0
+        self.evasion_bonus_duration = 0
+        self.armor_reduction_targets = {}
+        self.is_casting = False
+        self.casting_skill = None
+        self.casting_progress = 0
+        self.casting_total = 0
         
         self.collection = set()
         self.enhance_materials = 0
@@ -589,3 +607,104 @@ class Character(Entity):
             if self.hp < self.max_hp * 0.3:
                 heal = int(self.max_hp * 0.02)
                 self.hp = min(self.max_hp, self.hp + heal)
+    
+    def update_skill_cooldowns(self):
+        for skill in self.skill_cooldowns:
+            if self.skill_cooldowns[skill] > 0:
+                self.skill_cooldowns[skill] -= 1
+    
+    def update_buff_durations(self):
+        if self.shield_duration > 0:
+            self.shield_duration -= 1
+            if self.shield_duration <= 0:
+                self.shield = 0
+        
+        if self.berserk_duration > 0:
+            self.berserk_duration -= 1
+            if self.berserk_duration <= 0:
+                self.is_berserk = False
+        
+        if self.invisible_duration > 0:
+            self.invisible_duration -= 1
+            if self.invisible_duration <= 0:
+                self.is_invisible = False
+        
+        if self.speed_bonus_duration > 0:
+            self.speed_bonus_duration -= 1
+            if self.speed_bonus_duration <= 0:
+                self.speed_bonus = 0
+        
+        if self.crit_damage_bonus_duration > 0:
+            self.crit_damage_bonus_duration -= 1
+            if self.crit_damage_bonus_duration <= 0:
+                self.crit_damage_bonus = 0
+        
+        if self.evasion_bonus_duration > 0:
+            self.evasion_bonus_duration -= 1
+            if self.evasion_bonus_duration <= 0:
+                self.evasion_bonus = 0
+        
+        for target_id in list(self.armor_reduction_targets.keys()):
+            self.armor_reduction_targets[target_id]['duration'] -= 1
+            if self.armor_reduction_targets[target_id]['duration'] <= 0:
+                del self.armor_reduction_targets[target_id]
+    
+    def get_armor_reduction(self, target_id):
+        if target_id in self.armor_reduction_targets:
+            return self.armor_reduction_targets[target_id]['amount']
+        return 0
+    
+    def can_use_skill(self, skill_type):
+        if self.has_status('stunned') or self.has_status('frozen'):
+            return False, '被控制无法释放技能'
+        
+        if self.skill_cooldowns.get(skill_type, 0) > 0:
+            return False, '技能冷却中'
+        
+        skill_data = SKILLS.get(self.class_type, {}).get(skill_type, {})
+        if not skill_data:
+            return False, '技能不存在'
+        
+        if self.level < skill_data.get('unlock_level', 1):
+            return False, f'需要等级{skill_data.get("unlock_level", 1)}'
+        
+        if self.mp < skill_data.get('mp_cost', 0):
+            return False, '魔力不足'
+        
+        return True, '可以释放'
+    
+    def use_skill_mp(self, skill_type):
+        skill_data = SKILLS.get(self.class_type, {}).get(skill_type, {})
+        mp_cost = skill_data.get('mp_cost', 0)
+        self.mp -= mp_cost
+        self.skill_cooldowns[skill_type] = skill_data.get('cooldown', 0)
+    
+    def take_damage(self, amount):
+        super().take_damage(amount)
+        
+        if self.shield > 0:
+            absorbed = min(self.shield, amount)
+            self.shield -= absorbed
+            amount -= absorbed
+            if amount <= 0:
+                return 0
+        
+        actual_damage = max(1, amount - self.get_total_defense() // 2)
+        self.hp -= actual_damage
+        return actual_damage
+    
+    def get_total_critical_damage(self):
+        total = self.critical_damage + self.crit_damage_bonus
+        for slot, item in self.equipment.items():
+            if item and hasattr(item, 'base_stats'):
+                total += item.base_stats.get('critical_damage', 0)
+        return total
+    
+    def get_total_evasion(self):
+        total = self.evasion + self.dex * 2 + self.evasion_bonus
+        for slot, item in self.equipment.items():
+            if item and hasattr(item, 'base_stats'):
+                total += item.base_stats.get('evasion', 0)
+        set_bonus = self.get_set_bonuses()
+        total += set_bonus.get('evasion', 0)
+        return min(95, total)

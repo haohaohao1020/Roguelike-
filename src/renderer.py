@@ -435,9 +435,76 @@ class MonsterRenderer:
         pygame.draw.rect(screen, (200, 200, 200), (bar_x, y, bar_width, bar_height), 1)
 
 
-class PlayerRenderer:
+class SkillEffectRenderer:
     def __init__(self):
         pass
+    
+    def draw_skill_effect(self, screen, effect, camera_x, camera_y):
+        screen_x = effect['x'] * TILE_SIZE - int(camera_x)
+        screen_y = effect['y'] * TILE_SIZE - int(camera_y)
+        progress = 1 - effect['life'] / effect['max_life']
+        
+        effect_type = effect['type']
+        radius = int(20 + progress * 40)
+        alpha = int(200 * (1 - progress))
+        
+        if 'warrior' in effect_type:
+            color = (255, 100, 50, alpha)
+            if 'ultimate' in effect_type:
+                radius = int(30 + progress * 60)
+        elif 'mage' in effect_type:
+            color = (255, 150, 0, alpha)
+            if 'ultimate' in effect_type:
+                radius = int(50 + progress * 100)
+                color = (255, 100, 0, alpha)
+        elif 'rogue' in effect_type:
+            color = (100, 255, 100, alpha)
+            if 'ultimate' in effect_type:
+                color = (50, 200, 50, alpha)
+        elif 'paladin' in effect_type:
+            color = (255, 255, 150, alpha)
+            if 'ultimate' in effect_type:
+                radius = int(100 + progress * 200)
+                color = (255, 255, 200, alpha)
+        else:
+            color = (255, 255, 255, alpha)
+        
+        surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        pygame.draw.circle(surf, color, (radius, radius), radius, 3)
+        if 'ultimate' in effect_type:
+            pygame.draw.circle(surf, (color[0], color[1], color[2], alpha // 2), (radius, radius), radius - 10)
+        screen.blit(surf, (screen_x + TILE_SIZE // 2 - radius, screen_y + TILE_SIZE // 2 - radius))
+    
+    def draw_damage_numbers(self, screen, damage_numbers, camera_x, camera_y):
+        for dn in damage_numbers:
+            screen_x = dn.x * TILE_SIZE - int(camera_x) + TILE_SIZE // 2
+            screen_y = dn.y * TILE_SIZE - int(camera_y) + TILE_SIZE // 2
+            
+            if dn.color:
+                color = dn.color
+            elif dn.is_heal:
+                color = (100, 255, 100)
+            elif dn.is_crit:
+                color = (255, 50, 50)
+            else:
+                color = (255, 255, 255)
+            
+            font = FONT_LARGE if dn.is_crit else FONT_NORMAL
+            text = font.render(f'+{dn.damage}' if dn.is_heal else f'{dn.damage}', True, color)
+            text.set_alpha(dn.alpha)
+            
+            text_rect = text.get_rect(center=(screen_x, screen_y))
+            screen.blit(text, text_rect)
+            
+            if dn.is_crit:
+                crit_text = FONT_SMALL.render('暴击!', True, (255, 200, 0))
+                crit_text.set_alpha(dn.alpha)
+                crit_rect = crit_text.get_rect(center=(screen_x, screen_y - 25))
+                screen.blit(crit_text, crit_rect)
+
+class PlayerRenderer:
+    def __init__(self):
+        self.skill_effect_renderer = SkillEffectRenderer()
     
     def draw_warrior(self, screen, x, y, camera_x, camera_y, is_hurt=False):
         screen_x = x * TILE_SIZE - int(camera_x)

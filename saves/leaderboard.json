@@ -1,6 +1,11 @@
 [
   {
     "name": "勇者",
+    "score": 5600,
+    "floor": 5
+  },
+  {
+    "name": "勇者",
     "score": 800,
     "floor": 1
   },

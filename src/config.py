@@ -230,6 +230,119 @@ BASE_STAT_NAMES = {
 
 MAX_FLOOR = 5
 
+SKILLS = {
+    'warrior': {
+        'basic': {
+            'name': '破甲猛击',
+            'mp_cost': 15,
+            'cooldown': 3,
+            'damage_multiplier': 2.0,
+            'armor_reduction': 0.3,
+            'armor_reduction_duration': 2,
+            'lifesteal': 0.2,
+            'description': '近距离重击敌人，造成高额物理伤害，降低敌方30%防御，持续2回合',
+            'unlock_level': 1,
+            'range': 1.5
+        },
+        'ultimate': {
+            'name': '狂怒碎山斩',
+            'mp_cost': 50,
+            'cooldown': 8,
+            'damage_multiplier': 4.0,
+            'berserk_duration': 3,
+            'berserk_crit_bonus': 30,
+            'berserk_damage_bonus': 0.5,
+            'description': '全力劈砍造成巨额伤害，进入狂暴状态3回合，提升暴击率和伤害',
+            'unlock_level': 5,
+            'range': 1.5,
+            'unstoppable': True
+        }
+    },
+    'mage': {
+        'basic': {
+            'name': '烈焰弹',
+            'mp_cost': 12,
+            'cooldown': 2,
+            'damage_multiplier': 1.5,
+            'burn_damage': 8,
+            'burn_duration': 3,
+            'description': '远程释放火焰法球，造成火系伤害并附加灼烧状态',
+            'unlock_level': 1,
+            'range': 5.0
+        },
+        'ultimate': {
+            'name': '陨星天火',
+            'mp_cost': 60,
+            'cooldown': 10,
+            'damage_multiplier': 2.5,
+            'burn_damage': 15,
+            'burn_duration': 3,
+            'slow_amount': 0.5,
+            'slow_duration': 2,
+            'description': '召唤大范围天火，对全场敌人造成伤害并附加灼烧和减速',
+            'unlock_level': 5,
+            'range': 999.0
+        }
+    },
+    'rogue': {
+        'basic': {
+            'name': '暗影突袭',
+            'mp_cost': 18,
+            'cooldown': 3,
+            'damage_multiplier': 2.5,
+            'guaranteed_crit': True,
+            'evasion_bonus': 30,
+            'evasion_duration': 2,
+            'description': '瞬间突进至敌人身后背刺，百分百暴击，提升闪避率',
+            'unlock_level': 1,
+            'range': 3.0
+        },
+        'ultimate': {
+            'name': '影杀千刃',
+            'mp_cost': 55,
+            'cooldown': 9,
+            'damage_multiplier': 1.2,
+            'hit_count': 5,
+            'defense_ignore': 0.5,
+            'invisible_duration': 1,
+            'speed_bonus': 2,
+            'speed_duration': 3,
+            'crit_damage_bonus': 50,
+            'crit_damage_duration': 3,
+            'description': '隐身连续穿刺多段伤害，无视部分防御，结束后提升移速和暴伤',
+            'unlock_level': 5,
+            'range': 2.0
+        }
+    },
+    'paladin': {
+        'basic': {
+            'name': '神圣庇护',
+            'mp_cost': 20,
+            'cooldown': 4,
+            'shield_amount': 50,
+            'shield_duration': 3,
+            'team_defense_bonus': 0.2,
+            'team_defense_duration': 3,
+            'description': '为自身附加神圣护盾，同时小幅提升队友防御力',
+            'unlock_level': 1,
+            'range': 0
+        },
+        'ultimate': {
+            'name': '圣光审判',
+            'mp_cost': 65,
+            'cooldown': 12,
+            'damage_multiplier': 2.0,
+            'heal_amount': 0.5,
+            'cleanse_negative': True,
+            'description': '全屏圣光对敌人造成神圣伤害，为队友回血并清除负面状态',
+            'unlock_level': 5,
+            'range': 999.0
+        }
+    }
+}
+
+UI_ALPHA = 180
+
 pygame.font.init()
 
 def get_chinese_font(size):
