@@ -331,7 +331,11 @@ class Game:
         if self.game_map.stairs_pos:
             sx, sy = self.game_map.stairs_pos
             if player.x == sx and player.y == sy:
-                self.go_downstairs()
+                boss_alive = any(hasattr(m, 'monster_type') and m.monster_type == 'boss' and m.is_alive() for m in self.monsters)
+                if boss_alive:
+                    self.add_message('必须先击杀Boss才能前往下一层！')
+                else:
+                    self.go_downstairs()
         
         return True
     
@@ -2334,11 +2338,14 @@ class Game:
             if idx > 0:
                 self.synthesis_quality = quality_options[idx - 1]
                 self.synthesis_selection = 0
-        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+            return
+        
+        if event.key in [pygame.K_RIGHT, pygame.K_d]:
             idx = quality_options.index(self.synthesis_quality)
             if idx < len(quality_options) - 1:
                 self.synthesis_quality = quality_options[idx + 1]
                 self.synthesis_selection = 0
+            return
         
         equip_by_quality = self.synthesis.get_synthesizeable_equipment(self.player.inventory)
         materials = equip_by_quality.get(self.synthesis_quality, [])
@@ -2348,11 +2355,13 @@ class Game:
             if event.key in [pygame.K_UP, pygame.K_w]:
                 if self.synthesis_selection > 0:
                     self.synthesis_selection -= 1
+                return
             elif event.key in [pygame.K_DOWN, pygame.K_s]:
                 if self.synthesis_selection < len(materials) - 1:
                     self.synthesis_selection += 1
+                return
         
-        elif event.key == pygame.K_RETURN:
+        if event.key == pygame.K_RETURN:
             if len(materials) >= 3:
                 success, msg, new_equip = self.synthesis.synthesize(self.synthesis_quality, self.player.inventory, self.floor)
                 if success and new_equip:
@@ -2360,13 +2369,16 @@ class Game:
                 self.add_message(msg)
             else:
                 self.add_message('材料不足！需要3件同品质装备')
+            return
         
-        elif event.key == pygame.K_b:
+        if event.key == pygame.K_b:
             success, msg, results = self.synthesis.bulk_synthesize(self.synthesis_quality, self.player.inventory, self.floor)
             self.add_message(msg)
+            return
         
-        elif event.key == pygame.K_ESCAPE:
+        if event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
+            return
     
     def handle_talent_input(self, event):
         talent_categories = ['strength', 'dexterity', 'intelligence', 'defense', 'hp', 'mp']

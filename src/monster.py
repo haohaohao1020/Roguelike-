@@ -264,7 +264,14 @@ class Monster(Entity):
                 moves = 2 if self.monster_type == 'boss' else 1
                 for _ in range(moves):
                     if random.random() < 0.8:
-                        self.move_towards_target(game_map, target_player.x, target_player.y, entities)
+                        if self.monster_type == 'boss' and hasattr(self, 'spawn_x') and hasattr(self, 'spawn_y'):
+                            distance_to_spawn = ((self.x - self.spawn_x) ** 2 + (self.y - self.spawn_y) ** 2) ** 0.5
+                            if distance_to_spawn >= 60:
+                                self.move_towards_target(game_map, self.spawn_x, self.spawn_y, entities)
+                            else:
+                                self.move_towards_target(game_map, target_player.x, target_player.y, entities)
+                        else:
+                            self.move_towards_target(game_map, target_player.x, target_player.y, entities)
         
         elif self.ai_type == 'aggressive' and distance <= actual_aggro_range * 2:
             self.is_aggro = True
@@ -621,6 +628,8 @@ class Boss(Monster):
         self.special_ability = boss_data['special']
         self.special_cooldown = 0
         self.floor = floor
+        self.spawn_x = x
+        self.spawn_y = y
     
     def update_special(self, game_map, player, entities, all_players=None):
         if self.special_cooldown > 0:
