@@ -415,20 +415,27 @@ class ReviverMonster(Monster):
         self.floor = floor
     
     def take_damage(self, amount):
-        super().take_damage(amount)
         actual = max(1, amount - self.defense // 2)
         self.hp -= actual
         self.is_aggro = True
         
         if self.hp <= 0 and not self.is_down and self.revive_count < self.max_revive:
-            if amount > self.max_hp * 0.5:
-                pass
-            else:
+            if amount <= self.max_hp * 0.5:
                 self.is_down = True
                 self.down_timer = 3
                 self.hp = 1
+                return actual
         
         return actual
+    
+    def update_special(self, game_map, player, entities, all_players=None):
+        if self.is_down:
+            self.down_timer -= 1
+            if self.down_timer <= 0:
+                self.is_down = False
+                self.revive_count += 1
+                heal_percent = random.uniform(0.3, 0.5)
+                self.hp = int(self.max_hp * heal_percent)
 
 class Goblin(Monster):
     def __init__(self, x, y, floor=1):

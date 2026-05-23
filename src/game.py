@@ -72,6 +72,26 @@ class Game:
         if len(self.message_log) > 5:
             self.message_log.pop(0)
     
+    def load_saved_game(self):
+        try:
+            save_data = self.save_manager.load_game()
+            if save_data:
+                self.player = save_data.get('player')
+                self.floor = save_data.get('floor', 1)
+                self.game_map = save_data.get('game_map')
+                self.monsters = save_data.get('monsters', [])
+                self.items = save_data.get('items', [])
+                self.game_mode = 'single'
+                self.player2 = None
+                self.state = GameState.PLAYING
+                self.menu_selection = 0
+                self.add_message(f'成功加载存档！当前第{self.floor}层')
+            else:
+                self.add_message('存档数据损坏！')
+        except Exception as e:
+            print(f'加载存档失败: {e}')
+            self.add_message('加载存档失败！')
+    
     def generate_floor(self):
         self.game_map = GameMap(MAP_WIDTH, MAP_HEIGHT, self.floor)
         self.game_map.generate_map()
@@ -1671,7 +1691,7 @@ class Game:
                 self.menu_selection = 0
             elif self.menu_selection == 1:
                 if self.save_manager.has_save():
-                    pass
+                    self.load_saved_game()
                 else:
                     self.add_message('没有找到存档！')
             elif self.menu_selection == 2:
