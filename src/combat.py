@@ -97,15 +97,26 @@ class CombatSystem:
         return True
     
     def handle_death(self, killer, victim):
-        self.add_log(f'{victim.name} 被击败了！')
+        self.add_log(f'💀 {victim.name} 被击败了！')
+        
+        if hasattr(victim, 'drop_loot') and hasattr(killer, 'add_item'):
+            if victim.monster_type in ['elite', 'boss', 'normal']:
+                drops = victim.drop_loot()
+                for drop in drops:
+                    if killer.add_item(drop):
+                        quality_name = QUALITY_NAMES.get(drop.quality, '普通')
+                        self.add_log(f'💎 {victim.name} 掉落了 {quality_name} {drop.name}！已存入背包！')
+                    else:
+                        quality_name = QUALITY_NAMES.get(drop.quality, '普通')
+                        self.add_log(f'📦 {victim.name} 掉落了 {quality_name} {drop.name}！背包已满！')
         
         if hasattr(killer, 'gain_exp') and hasattr(victim, 'exp'):
             killer.gain_exp(victim.exp)
-            self.add_log(f'{killer.name} 获得了 {victim.exp} 经验！')
+            self.add_log(f'✨ {killer.name} 获得了 {victim.exp} 经验！')
         
         if hasattr(killer, 'gold') and hasattr(victim, 'gold'):
             killer.gold += victim.gold
-            self.add_log(f'{killer.name} 获得了 {victim.gold} 金币！')
+            self.add_log(f'💰 {killer.name} 获得了 {victim.gold} 金币！')
     
     def use_basic_skill(self, user, target=None, all_enemies=None, allies=None):
         can_use, message = user.can_use_skill('basic')

@@ -609,11 +609,7 @@ class Character(Entity):
         return count
     
     def apply_passive_effects(self):
-        if self.class_type == 'paladin':
-            self.defense += 2
-            if self.hp < self.max_hp * 0.3:
-                heal = int(self.max_hp * 0.02)
-                self.hp = min(self.max_hp, self.hp + heal)
+        pass
     
     def update_skill_cooldowns(self):
         for skill in self.skill_cooldowns:

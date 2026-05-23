@@ -92,7 +92,7 @@ class Monster(Entity):
         return actual
     
     def is_alive(self):
-        return (self.hp > 0 or self.is_down) and not (self.hp <= 0 and not self.is_down)
+        return self.hp > 0 or self.is_down
     
     def should_remove(self):
         return self.hp <= 0 and not self.is_down

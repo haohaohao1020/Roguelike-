@@ -381,15 +381,12 @@ class Game:
         
         dead_monsters = []
         for monster in self.monsters:
-            if hasattr(monster, 'should_remove') and monster.should_remove():
-                dead_monsters.append(monster)
-            elif not hasattr(monster, 'is_alive'):
-                if monster.hp <= 0:
+            if hasattr(monster, 'should_remove'):
+                if monster.should_remove():
                     dead_monsters.append(monster)
-            elif not monster.is_alive() and not hasattr(monster, 'is_down'):
-                dead_monsters.append(monster)
-            elif hasattr(monster, 'is_down') and monster.is_down == False and monster.hp <= 0:
-                dead_monsters.append(monster)
+            elif not monster.is_alive():
+                if not hasattr(monster, 'is_down') or not monster.is_down:
+                    dead_monsters.append(monster)
         
         for monster in dead_monsters:
             if hasattr(monster, 'master') and monster.master:
@@ -402,14 +399,18 @@ class Game:
                     if summon in self.monsters:
                         self.monsters.remove(summon)
             
-            if hasattr(monster, 'drop_loot'):
+            if hasattr(monster, 'drop_loot') and monster.monster_type in ['elite', 'boss', 'normal']:
                 drops = monster.drop_loot()
                 for drop in drops:
-                    drop.x = monster.x
-                    drop.y = monster.y
-                    self.items.append(drop)
-                    quality_name = QUALITY_NAMES.get(drop.quality, '普通')
-                    self.add_message(f'{monster.name} 掉落了 {quality_name} {drop.name}！')
+                    if self.player.add_item(drop):
+                        quality_name = QUALITY_NAMES.get(drop.quality, '普通')
+                        self.add_message(f'💎 {monster.name} 掉落了 {quality_name} {drop.name}！已存入背包！')
+                    else:
+                        drop.x = monster.x
+                        drop.y = monster.y
+                        self.items.append(drop)
+                        quality_name = QUALITY_NAMES.get(drop.quality, '普通')
+                        self.add_message(f'{monster.name} 掉落了 {quality_name} {drop.name}！背包已满，掉落在地上！')
             
             if monster in self.monsters:
                 self.monsters.remove(monster)
