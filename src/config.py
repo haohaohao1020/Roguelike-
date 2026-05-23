@@ -341,7 +341,7 @@ SKILLS = {
     }
 }
 
-UI_ALPHA = 180
+UI_ALPHA = 120
 
 pygame.font.init()
 

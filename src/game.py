@@ -261,7 +261,26 @@ class Game:
         
         if current_room_type == 'shop' and self.last_room_type != 'shop':
             self.state = GameState.SHOP
-            self.shop.refresh_items()
+            self.shop.refresh_items(self.game_mode)
+            
+            if self.game_mode == 'coop':
+                has_dead_teammate = False
+                if self.player2 and not self.player2.is_alive():
+                    has_dead_teammate = True
+                elif not self.player.is_alive():
+                    has_dead_teammate = True
+                
+                if has_dead_teammate:
+                    from .items import ReviveScroll
+                    has_revive = False
+                    for item in self.shop.inventory:
+                        if hasattr(item, 'item_type') and item.item_type == 'revive_scroll':
+                            has_revive = True
+                            break
+                    if not has_revive:
+                        self.shop.inventory.append(ReviveScroll(0, 0))
+                        self.add_message('老板拿出了一张复活符！')
+            
             self.add_message('欢迎来到商店！')
         elif current_room_type == 'rest' and self.last_room_type != 'rest':
             self.add_message('休息点！按 E 键恢复生命和魔力。')
@@ -296,12 +315,13 @@ class Game:
             all_players.append(self.player2)
         
         for player in all_players:
-            status_messages = player.update_status_effects()
-            for msg in status_messages:
-                self.add_message(msg)
-            player.apply_passive_effects()
-            player.update_skill_cooldowns()
-            player.update_buff_durations()
+            if player.is_alive():
+                status_messages = player.update_status_effects()
+                for msg in status_messages:
+                    self.add_message(msg)
+                player.apply_passive_effects()
+                player.update_skill_cooldowns()
+                player.update_buff_durations()
         
         targets = all_players
         
@@ -1869,10 +1889,13 @@ class Game:
                         msg = item.use(self.player, self)
                     else:
                         msg = item.use(self.player)
-                    self.add_message(msg)
-                    if '无法' not in msg and '没有' not in msg:
-                        self.player.remove_item(item)
-                        self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
+                    if msg:
+                        self.add_message(msg)
+                        if '无法' not in msg and '没有' not in msg:
+                            self.player.remove_item(item)
+                            self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
+                    else:
+                        self.add_message('这个物品无法使用！')
                 else:
                     self.add_message('这个物品无法使用！')
         elif event.key == pygame.K_ESCAPE:

@@ -36,6 +36,14 @@ class Equipment(Item):
         self.generate_set()
         self.calculate_value()
     
+    def use(self, user):
+        if hasattr(user, 'equip_item'):
+            success = user.equip_item(self)
+            if success:
+                return f'装备了 {self.name}！'
+            return '背包中已装备这个物品'
+        return None
+    
     def generate_stats(self):
         quality_multipliers = {
             'common': 1.0,
