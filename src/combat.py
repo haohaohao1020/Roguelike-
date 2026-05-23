@@ -110,6 +110,13 @@ class CombatSystem:
                         quality_name = QUALITY_NAMES.get(drop.quality, '普通')
                         self.add_log(f'📦 {victim.name} 掉落了 {quality_name} {drop.name}！背包已满！')
         
+        if hasattr(victim, 'monster_type') and victim.monster_type == 'boss':
+            if random.random() < 0.5:
+                from .items import MapReveal
+                map_reveal = MapReveal(0, 0)
+                if killer.add_item(map_reveal):
+                    self.add_log(f'🗺️ 获得了 {map_reveal.name}！可透视全图！')
+        
         if hasattr(killer, 'gain_exp') and hasattr(victim, 'exp'):
             killer.gain_exp(victim.exp)
             self.add_log(f'✨ {killer.name} 获得了 {victim.exp} 经验！')

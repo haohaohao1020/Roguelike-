@@ -228,6 +228,10 @@ class Monster(Entity):
             self.reveal_stun -= 1
             return
         
+        if hasattr(self, 'is_summon') and self.is_summon:
+            self.update_summon_ai(game_map, entities)
+            return
+        
         if hasattr(self, 'update_special'):
             self.update_special(game_map, player, entities, all_players)
         
@@ -265,6 +269,37 @@ class Monster(Entity):
         elif self.ai_type == 'aggressive' and distance <= actual_aggro_range * 2:
             self.is_aggro = True
             self.move_towards_target(game_map, target_player.x, target_player.y, entities)
+    
+    def update_summon_ai(self, game_map, entities):
+        master = self.summon_master if hasattr(self, 'summon_master') else None
+        if not master or not master.is_alive():
+            return
+        
+        enemy_monsters = [m for m in entities 
+                         if hasattr(m, 'monster_type') 
+                         and not (hasattr(m, 'is_summon') and m.is_summon)
+                         and not (hasattr(m, 'is_player1') and m.is_player1)
+                         and not (hasattr(m, 'is_player2') and m.is_player2)
+                         and m.is_alive()]
+        
+        distance_to_master = self.get_distance_to(master)
+        
+        if enemy_monsters:
+            target = min(enemy_monsters, key=lambda m: self.get_distance_to(m))
+            distance = self.get_distance_to(target)
+            
+            if distance <= 1.5:
+                if hasattr(master, 'get_total_physical_attack'):
+                    damage = int(master.get_total_physical_attack() * 0.5 + self.damage * 0.5)
+                else:
+                    damage = self.damage
+                target.take_damage(damage)
+            elif distance <= 5:
+                self.move_towards_target(game_map, target.x, target.y, entities)
+            elif distance_to_master > 2:
+                self.move_towards_target(game_map, master.x, master.y, entities)
+        elif distance_to_master > 1.5:
+            self.move_towards_target(game_map, master.x, master.y, entities)
     
     def move_towards_target(self, game_map, target_x, target_y, entities):
         move = self.find_path_around_traps(game_map, target_x, target_y, entities)

@@ -37,7 +37,8 @@ QUALITY_COLORS = {
     'uncommon': GREEN,
     'rare': BLUE,
     'epic': PURPLE,
-    'legendary': GOLD
+    'legendary': GOLD,
+    'mythic': (255, 0, 0)
 }
 
 ROOM_TYPES = ['normal', 'treasure', 'shop', 'rest', 'trap', 'boss', 'altar', 'blacksmith', 'library', 'event']
@@ -105,7 +106,8 @@ QUALITY_NAMES = {
     'uncommon': '蓝装',
     'rare': '紫装',
     'epic': '橙装',
-    'legendary': '金装'
+    'legendary': '金装',
+    'mythic': '红装'
 }
 
 QUALITY_BORDER_COLORS = {
@@ -113,7 +115,8 @@ QUALITY_BORDER_COLORS = {
     'uncommon': (100, 200, 100),
     'rare': (100, 100, 255),
     'epic': (200, 100, 200),
-    'legendary': (255, 215, 0)
+    'legendary': (255, 215, 0),
+    'mythic': (255, 0, 0)
 }
 
 SUB_STAT_TYPES = [

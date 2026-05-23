@@ -9,6 +9,7 @@ from .combat import CombatSystem
 from .save_manager import SaveManager, Shop
 from .asset_loader import asset_loader
 from .renderer import DungeonRenderer, MonsterRenderer, PlayerRenderer
+from .items import SynthesisSystem
 
 class GameState:
     MENU = 'menu'
@@ -22,6 +23,7 @@ class GameState:
     CLASS_SELECT = 'class_select'
     TALENT = 'talent'
     MODE_SELECT = 'mode_select'
+    SYNTHESIS = 'synthesis'
 
 class Game:
     def __init__(self):
@@ -34,10 +36,17 @@ class Game:
         self.save_manager = SaveManager()
         self.combat = CombatSystem()
         self.shop = Shop()
+        self.synthesis = SynthesisSystem()
         
         self.dungeon_renderer = DungeonRenderer()
         self.monster_renderer = MonsterRenderer()
         self.player_renderer = PlayerRenderer()
+        
+        self.map_reveal_duration = 0
+        self.synthesis_selection = 0
+        self.synthesis_quality = 'common'
+        self.shop_tab = 0
+        self.gamble_selection = 0
         
         self.state = GameState.MENU
         self.game_mode = 'single'
@@ -172,14 +181,17 @@ class Game:
     def new_game(self, class_type, class_type2=None):
         self.player = Character(MAP_WIDTH // 2, MAP_HEIGHT // 2, '勇者1', class_type)
         self.player.is_player1 = True
+        self.player.teleport_anchors = []
         self.player2 = None
         if self.game_mode == 'coop' and class_type2:
             self.player2 = Character(MAP_WIDTH // 2 + 1, MAP_HEIGHT // 2, '勇者2', class_type2)
             self.player2.is_player2 = True
+            self.player2.teleport_anchors = []
         self.shop.refresh_items(self.game_mode)
         self.floor = 1
         self.turn = 0
         self.message_log = []
+        self.map_reveal_duration = 0
         self.generate_floor()
         self.state = GameState.PLAYING
         if self.game_mode == 'coop':
@@ -271,16 +283,28 @@ class Game:
                 if affected and msg:
                     self.add_message(msg)
                 
-                if player_num == 1:
+                if self.game_mode == 'coop' and self.player2:
+                    if self.player.is_alive():
+                        self.game_map.update_fov(self.player.x, self.player.y, 15)
+                    elif self.player2.is_alive():
+                        self.game_map.update_fov(self.player2.x, self.player2.y, 15)
+                else:
                     self.game_map.update_fov(player.x, player.y, 15)
-                    self.update_camera()
+                self.update_camera()
         
         room = self.game_map.get_room_at(player.x, player.y)
         current_room_type = room.room_type if room else None
         
         if current_room_type == 'shop' and self.last_room_type != 'shop':
             self.state = GameState.SHOP
-            self.shop.refresh_items(self.game_mode)
+            
+            self.shop.is_mysterious = random.random() < 0.15
+            self.shop.refresh_items(self.game_mode, self.floor)
+            
+            if self.shop.is_mysterious:
+                self.add_message('🎭 遇到了神秘商人！有稀有物品出售！')
+            else:
+                self.add_message('欢迎来到商店！')
             
             if self.game_mode == 'coop':
                 has_dead_teammate = False
@@ -299,8 +323,6 @@ class Game:
                     if not has_revive:
                         self.shop.inventory.append(ReviveScroll(0, 0))
                         self.add_message('老板拿出了一张复活符！')
-            
-            self.add_message('欢迎来到商店！')
         elif current_room_type == 'rest' and self.last_room_type != 'rest':
             self.add_message('休息点！按 E 键恢复生命和魔力。')
         
@@ -344,6 +366,22 @@ class Game:
                 player.update_skill_cooldowns()
                 player.update_buff_durations()
         
+        if self.map_reveal_duration > 0:
+            self.map_reveal_duration -= 1
+            if self.map_reveal_duration <= 0:
+                self.game_map.hide_reveal()
+                self.game_map.update_fov(self.player.x, self.player.y, 15)
+                self.add_message('地图透视效果消失了')
+        
+        for monster in self.monsters[:]:
+            if hasattr(monster, 'is_summon') and monster.is_summon:
+                if hasattr(monster, 'summon_duration'):
+                    monster.summon_duration -= 1
+                    if monster.summon_duration <= 0:
+                        self.add_message(f'{monster.name} 消失了！')
+                        self.monsters.remove(monster)
+                        continue
+        
         new_summons = []
         for monster in self.monsters:
             if hasattr(monster, 'summons') and monster.summons:
@@ -360,6 +398,10 @@ class Game:
                 continue
                 
             monster.update_status_effects()
+            
+            if hasattr(monster, 'is_summon') and monster.is_summon:
+                monster.update_ai(self.game_map, self.player, self.monsters + alive_players, alive_players)
+                continue
             
             monster.update_ai(self.game_map, self.player, self.monsters + alive_players, alive_players)
             
@@ -519,8 +561,13 @@ class Game:
         self.screen.blit(mp_text, mp_text_rect)
     
     def update_camera(self):
-        target_x = self.player.x * TILE_SIZE - SCREEN_WIDTH // 2
-        target_y = self.player.y * TILE_SIZE - SCREEN_HEIGHT // 2
+        camera_target = self.player
+        if self.game_mode == 'coop' and self.player2:
+            if not self.player.is_alive() and self.player2.is_alive():
+                camera_target = self.player2
+        
+        target_x = camera_target.x * TILE_SIZE - SCREEN_WIDTH // 2
+        target_y = camera_target.y * TILE_SIZE - SCREEN_HEIGHT // 2
         
         self.camera_x += (target_x - self.camera_x) * 0.1
         self.camera_y += (target_y - self.camera_y) * 0.1
@@ -537,7 +584,7 @@ class Game:
             self.render_mode_select()
         elif self.state == GameState.CLASS_SELECT:
             self.render_class_select()
-        elif self.state in [GameState.PLAYING, GameState.PAUSED, GameState.INVENTORY, GameState.SHOP, GameState.TALENT]:
+        elif self.state in [GameState.PLAYING, GameState.PAUSED, GameState.INVENTORY, GameState.SHOP, GameState.TALENT, GameState.SYNTHESIS]:
             self.render_game()
             if self.state == GameState.PAUSED:
                 self.render_pause_menu()
@@ -547,6 +594,8 @@ class Game:
                 self.render_shop()
             elif self.state == GameState.TALENT:
                 self.render_talent()
+            elif self.state == GameState.SYNTHESIS:
+                self.render_synthesis()
         elif self.state == GameState.GAME_OVER:
             self.render_game_over()
         elif self.state == GameState.VICTORY:
@@ -1307,78 +1356,263 @@ class Game:
         overlay.fill((0, 0, 0, 200))
         self.screen.blit(overlay, (0, 0))
         
-        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 450, 60, 900, 620)
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 500, 40, 1000, 680)
         pygame.draw.rect(self.screen, (30, 30, 45), panel_rect)
-        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
         
-        title = FONT_LARGE.render('商店', True, GOLD)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 95))
+        shop_title = '神秘商人' if self.shop.is_mysterious else '商店'
+        title_color = (255, 0, 255) if self.shop.is_mysterious else GOLD
+        pygame.draw.rect(self.screen, title_color, panel_rect, 3)
+        
+        title = FONT_LARGE.render(shop_title, True, title_color)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 70))
         self.screen.blit(title, title_rect)
         
         gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
-        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 350, 95))
+        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 400, 70))
         
-        mode_rect = pygame.Rect(SCREEN_WIDTH // 2 - 120, 95, 240, 35)
-        if self.shop_mode == 'buy':
-            pygame.draw.rect(self.screen, (40, 70, 100), mode_rect)
-            mode_text = FONT_NORMAL.render('购买模式', True, CYAN)
-        else:
-            pygame.draw.rect(self.screen, (70, 70, 40), mode_rect)
-            mode_text = FONT_NORMAL.render('出售模式', True, YELLOW)
-        mode_rect_text = mode_text.get_rect(center=(SCREEN_WIDTH // 2, 112))
-        self.screen.blit(mode_text, mode_rect_text)
+        if self.shop.discount < 1.0:
+            discount_text = FONT_NORMAL.render(f'🎉 折扣: {int(self.shop.discount * 100)}%!', True, (255, 100, 100))
+            self.screen.blit(discount_text, (SCREEN_WIDTH // 2 - 480, 70))
         
-        items_rect = pygame.Rect(panel_rect.x + 20, 150, 860, 420)
+        tab_y = 105
+        tab_width = 150
+        tab_names = ['购买', '出售', '刷新', '赌装备', '砍价']
+        for i, name in enumerate(tab_names):
+            tab_rect = pygame.Rect(panel_rect.x + 20 + i * tab_width, tab_y, tab_width - 5, 35)
+            if self.shop_tab == i:
+                pygame.draw.rect(self.screen, (60, 80, 120), tab_rect)
+                tab_color = YELLOW
+            else:
+                pygame.draw.rect(self.screen, (40, 40, 60), tab_rect)
+                tab_color = WHITE
+            pygame.draw.rect(self.screen, (80, 80, 100), tab_rect, 2)
+            tab_text = FONT_NORMAL.render(name, True, tab_color)
+            tab_text_rect = tab_text.get_rect(center=tab_rect.center)
+            self.screen.blit(tab_text, tab_text_rect)
+        
+        items_rect = pygame.Rect(panel_rect.x + 20, 150, 960, 460)
         pygame.draw.rect(self.screen, (25, 25, 35), items_rect)
         pygame.draw.rect(self.screen, (60, 60, 80), items_rect, 2)
         
-        items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
-        
-        y = 160
-        for i, item in enumerate(items[:14]):
-            if i == self.shop_selection:
-                bg_color = (60, 70, 90)
-                text_color = YELLOW
-            else:
-                bg_color = (35, 35, 50)
-                text_color = WHITE
+        if self.shop_tab in [0, 1]:
+            self.shop_mode = 'buy' if self.shop_tab == 0 else 'sell'
+            items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
             
-            item_bg = pygame.Rect(items_rect.x + 10, y, 840, 28)
+            y = 160
+            for i, item in enumerate(items[:14]):
+                if i == self.shop_selection:
+                    bg_color = (60, 70, 90)
+                    text_color = YELLOW
+                else:
+                    bg_color = (35, 35, 50)
+                    text_color = WHITE
+                
+                item_bg = pygame.Rect(items_rect.x + 10, y, 940, 28)
+                pygame.draw.rect(self.screen, bg_color, item_bg)
+                
+                price = self.shop.get_item_price(item) if self.shop_mode == 'buy' else max(1, item.value // 2)
+                
+                quality_color = QUALITY_COLORS.get(item.quality, WHITE) if hasattr(item, 'quality') else WHITE
+                item_text = FONT_NORMAL.render(f'{i + 1}. {item.name}', True, quality_color)
+                price_text = FONT_NORMAL.render(f'{price} 金币', True, text_color)
+                
+                self.screen.blit(item_text, (items_rect.x + 20, y + 3))
+                self.screen.blit(price_text, (items_rect.x + 850, y + 3))
+                y += 30
+        
+        elif self.shop_tab == 2:
+            refresh_cost = self.shop.get_refresh_cost()
+            info_text = FONT_NORMAL.render(f'当前刷新费用: {refresh_cost} 金币', True, WHITE)
+            info_rect = info_text.get_rect(center=(items_rect.centerx, items_rect.y + 50))
+            self.screen.blit(info_text, info_rect)
+            
+            count_text = FONT_NORMAL.render(f'已刷新次数: {self.shop.refresh_count}', True, GRAY)
+            count_rect = count_text.get_rect(center=(items_rect.centerx, items_rect.y + 90))
+            self.screen.blit(count_text, count_rect)
+            
+            hint_text = FONT_NORMAL.render('按回车键刷新商品', True, YELLOW)
+            hint_rect = hint_text.get_rect(center=(items_rect.centerx, items_rect.y + 150))
+            self.screen.blit(hint_text, hint_rect)
+            
+            hint2_text = FONT_NORMAL.render('楼层越高，刷新出高品质物品概率越高！', True, GRAY)
+            hint2_rect = hint2_text.get_rect(center=(items_rect.centerx, items_rect.y + 190))
+            self.screen.blit(hint2_text, hint2_rect)
+        
+        elif self.shop_tab == 3:
+            gamble_options = [
+                ('普通赌注 (50金币)', 'common', 50),
+                ('稀有赌注 (150金币)', 'uncommon', 150),
+                ('史诗赌注 (400金币)', 'rare', 400),
+                ('传说赌注 (1000金币)', 'epic', 1000)
+            ]
+            
+            y = items_rect.y + 30
+            for i, (name, quality, price) in enumerate(gamble_options):
+                gamble_rect = pygame.Rect(items_rect.x + 50, y, 860, 50)
+                if self.gamble_selection == i:
+                    pygame.draw.rect(self.screen, (80, 60, 100), gamble_rect)
+                    border_color = YELLOW
+                else:
+                    pygame.draw.rect(self.screen, (40, 40, 60), gamble_rect)
+                    border_color = (80, 80, 100)
+                pygame.draw.rect(self.screen, border_color, gamble_rect, 2)
+                
+                quality_color = QUALITY_COLORS.get(quality, WHITE)
+                gamble_text = FONT_NORMAL.render(name, True, quality_color)
+                gamble_rect_text = gamble_text.get_rect(center=gamble_rect.center)
+                self.screen.blit(gamble_text, gamble_rect_text)
+                y += 65
+            
+            hint_text = FONT_NORMAL.render('按回车键赌装备！有几率获得更高品质装备！', True, YELLOW)
+            hint_rect = hint_text.get_rect(center=(items_rect.centerx, items_rect.y + 320))
+            self.screen.blit(hint_text, hint_rect)
+        
+        elif self.shop_tab == 4:
+            attempts_text = FONT_NORMAL.render(f'剩余砍价次数: {self.shop.max_bargain_attempts - self.shop.bargain_attempts}', True, WHITE)
+            attempts_rect = attempts_text.get_rect(center=(items_rect.centerx, items_rect.y + 50))
+            self.screen.blit(attempts_text, attempts_rect)
+            
+            if self.shop.inventory and 0 <= self.shop_selection < len(self.shop.inventory):
+                item = self.shop.inventory[self.shop_selection]
+                current_price = self.shop.get_item_price(item)
+                
+                item_text = FONT_NORMAL.render(f'选中物品: {item.name}', True, YELLOW)
+                item_rect = item_text.get_rect(center=(items_rect.centerx, items_rect.y + 100))
+                self.screen.blit(item_text, item_rect)
+                
+                price_text = FONT_NORMAL.render(f'当前价格: {current_price} 金币', True, GOLD)
+                price_rect = price_text.get_rect(center=(items_rect.centerx, items_rect.y + 140))
+                self.screen.blit(price_text, price_rect)
+                
+                hint_text = FONT_NORMAL.render('按回车键尝试砍价！成功降价，失败涨价！', True, WHITE)
+                hint_rect = hint_text.get_rect(center=(items_rect.centerx, items_rect.y + 200))
+                self.screen.blit(hint_text, hint_rect)
+            else:
+                hint_text = FONT_NORMAL.render('请先在购买标签页选择要砍价的物品', True, GRAY)
+                hint_rect = hint_text.get_rect(center=(items_rect.centerx, items_rect.y + 150))
+                self.screen.blit(hint_text, hint_rect)
+        
+        exit_btn_rect = pygame.Rect(panel_rect.x + panel_rect.width - 220, panel_rect.y + panel_rect.height - 55, 200, 45)
+        pygame.draw.rect(self.screen, (100, 40, 40), exit_btn_rect)
+        exit_text = FONT_NORMAL.render('离开商店', True, WHITE)
+        exit_text_rect = exit_text.get_rect(center=exit_btn_rect.center)
+        self.screen.blit(exit_text, exit_text_rect)
+        self.shop_exit_btn = exit_btn_rect
+        
+        help_text = FONT_SMALL.render('← →切换标签 | ↑↓选择 | 回车确认 | ESC关闭', True, GRAY)
+        help_rect = help_text.get_rect(center=(panel_rect.centerx, panel_rect.y + panel_rect.height - 30))
+        self.screen.blit(help_text, help_rect)
+    
+    def render_synthesis(self):
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 220))
+        self.screen.blit(overlay, (0, 0))
+        
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 500, 50, 1000, 650)
+        pygame.draw.rect(self.screen, (25, 25, 38), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
+        title = FONT_LARGE.render('⚗️ 装备合成', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 85))
+        self.screen.blit(title, title_rect)
+        
+        gold_text = FONT_NORMAL.render(f'💰 {self.player.gold}', True, GOLD)
+        self.screen.blit(gold_text, (SCREEN_WIDTH // 2 + 400, 85))
+        
+        formula_text = FONT_NORMAL.render('合成公式: 3件同品质 → 1件更高品质', True, CYAN)
+        formula_rect = formula_text.get_rect(center=(SCREEN_WIDTH // 2, 125))
+        self.screen.blit(formula_text, formula_rect)
+        
+        quality_options = ['common', 'uncommon', 'rare', 'epic', 'legendary']
+        quality_names = ['白装 → 蓝装', '蓝装 → 紫装', '紫装 → 橙装', '橙装 → 金装', '金装 → 红装']
+        
+        for i, (q, name) in enumerate(zip(quality_options, quality_names)):
+            q_rect = pygame.Rect(panel_rect.x + 50 + i * 180, 150, 170, 40)
+            if self.synthesis_quality == q:
+                pygame.draw.rect(self.screen, (60, 70, 100), q_rect)
+                border_color = YELLOW
+            else:
+                pygame.draw.rect(self.screen, (35, 35, 50), q_rect)
+                border_color = (70, 70, 90)
+            pygame.draw.rect(self.screen, border_color, q_rect, 2)
+            
+            q_color = QUALITY_COLORS.get(q, WHITE)
+            q_text = FONT_SMALL.render(name, True, q_color)
+            q_text_rect = q_text.get_rect(center=q_rect.center)
+            self.screen.blit(q_text, q_text_rect)
+        
+        equip_by_quality = self.synthesis.get_synthesizeable_equipment(self.player.inventory)
+        count = len(equip_by_quality.get(self.synthesis_quality, []))
+        
+        count_text = FONT_NORMAL.render(f'当前可合成材料: {count} 件 (需要3件)', True, WHITE)
+        count_rect = count_text.get_rect(center=(SCREEN_WIDTH // 2, 210))
+        self.screen.blit(count_text, count_rect)
+        
+        items_rect = pygame.Rect(panel_rect.x + 20, 230, 450, 350)
+        pygame.draw.rect(self.screen, (20, 20, 30), items_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), items_rect, 2)
+        
+        items_title = FONT_NORMAL.render('可合成材料', True, GOLD)
+        self.screen.blit(items_title, (items_rect.x + 15, items_rect.y + 10))
+        
+        materials = equip_by_quality.get(self.synthesis_quality, [])
+        y = items_rect.y + 40
+        for i, item in enumerate(materials[:12]):
+            if i == self.synthesis_selection:
+                bg_color = (50, 50, 70)
+            else:
+                bg_color = (30, 30, 45)
+            
+            item_bg = pygame.Rect(items_rect.x + 8, y, 434, 24)
             pygame.draw.rect(self.screen, bg_color, item_bg)
             
-            price = item.value if self.shop_mode == 'buy' else max(1, item.value // 2)
-            item_text = FONT_NORMAL.render(f'{i + 1}. {item.name} - {price} 金币', True, text_color)
-            self.screen.blit(item_text, (items_rect.x + 20, y + 3))
-            y += 30
+            quality_color = QUALITY_COLORS.get(item.quality, WHITE)
+            item_text = FONT_SMALL.render(item.name, True, quality_color)
+            self.screen.blit(item_text, (items_rect.x + 15, y + 3))
+            y += 26
         
-        buy_btn_rect = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 200, 45)
-        sell_btn_rect = pygame.Rect(panel_rect.x + 240, panel_rect.y + panel_rect.height - 60, 200, 45)
-        exit_btn_rect = pygame.Rect(panel_rect.x + panel_rect.width - 220, panel_rect.y + panel_rect.height - 60, 200, 45)
+        history_rect = pygame.Rect(panel_rect.x + 490, 230, 490, 350)
+        pygame.draw.rect(self.screen, (20, 20, 30), history_rect)
+        pygame.draw.rect(self.screen, (70, 70, 90), history_rect, 2)
         
-        if self.shop_mode == 'buy':
-            pygame.draw.rect(self.screen, (40, 100, 60), buy_btn_rect)
-            pygame.draw.rect(self.screen, (60, 60, 80), sell_btn_rect)
+        history_title = FONT_NORMAL.render('合成记录', True, GOLD)
+        self.screen.blit(history_title, (history_rect.x + 15, history_rect.y + 10))
+        
+        history = self.synthesis.get_synthesis_history()
+        y = history_rect.y + 40
+        for record in history[-12:]:
+            record_text = FONT_SMALL.render(f"{record['result']}", True, (200, 200, 200))
+            self.screen.blit(record_text, (history_rect.x + 15, y))
+            y += 26
+        
+        synthesize_btn = pygame.Rect(panel_rect.x + 20, panel_rect.y + panel_rect.height - 60, 200, 45)
+        bulk_btn = pygame.Rect(panel_rect.x + 240, panel_rect.y + panel_rect.height - 60, 200, 45)
+        exit_btn = pygame.Rect(panel_rect.x + panel_rect.width - 220, panel_rect.y + panel_rect.height - 60, 200, 45)
+        
+        if count >= 3:
+            pygame.draw.rect(self.screen, (40, 100, 60), synthesize_btn)
+            synth_color = WHITE
         else:
-            pygame.draw.rect(self.screen, (60, 60, 80), buy_btn_rect)
-            pygame.draw.rect(self.screen, (100, 80, 40), sell_btn_rect)
+            pygame.draw.rect(self.screen, (60, 60, 60), synthesize_btn)
+            synth_color = GRAY
+        pygame.draw.rect(self.screen, (60, 100, 140), bulk_btn)
+        pygame.draw.rect(self.screen, (100, 40, 40), exit_btn)
         
-        pygame.draw.rect(self.screen, (100, 40, 40), exit_btn_rect)
+        synth_text = FONT_NORMAL.render('合成', True, synth_color)
+        bulk_text = FONT_NORMAL.render('批量合成', True, WHITE)
+        exit_text = FONT_NORMAL.render('关闭', True, WHITE)
         
-        buy_text = FONT_NORMAL.render('购买', True, WHITE)
-        sell_text = FONT_NORMAL.render('出售', True, WHITE)
-        exit_text = FONT_NORMAL.render('离开商店', True, WHITE)
+        self.screen.blit(synth_text, synth_text.get_rect(center=synthesize_btn.center))
+        self.screen.blit(bulk_text, bulk_text.get_rect(center=bulk_btn.center))
+        self.screen.blit(exit_text, exit_text.get_rect(center=exit_btn.center))
         
-        buy_text_rect = buy_text.get_rect(center=buy_btn_rect.center)
-        sell_text_rect = sell_text.get_rect(center=sell_btn_rect.center)
-        exit_text_rect = exit_text.get_rect(center=exit_btn_rect.center)
+        self.synth_btn = synthesize_btn
+        self.bulk_synth_btn = bulk_btn
+        self.synth_exit_btn = exit_btn
         
-        self.screen.blit(buy_text, buy_text_rect)
-        self.screen.blit(sell_text, sell_text_rect)
-        self.screen.blit(exit_text, exit_text_rect)
-        
-        self.shop_buy_btn = buy_btn_rect
-        self.shop_sell_btn = sell_btn_rect
-        self.shop_exit_btn = exit_btn_rect
+        help_text = FONT_SMALL.render('← →选择品质 | ↑↓选择物品 | 回车:合成 | B:批量 | ESC:关闭', True, GRAY)
+        help_rect = help_text.get_rect(center=(panel_rect.centerx, panel_rect.y + panel_rect.height - 30))
+        self.screen.blit(help_text, help_rect)
     
     def render_talent(self):
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1623,6 +1857,8 @@ class Game:
                     self.handle_shop_input(event)
                 elif self.state == GameState.TALENT:
                     self.handle_talent_input(event)
+                elif self.state == GameState.SYNTHESIS:
+                    self.handle_synthesis_input(event)
                 elif self.state in [GameState.GAME_OVER, GameState.VICTORY, GameState.LEADERBOARD]:
                     self.state = GameState.MENU
     
@@ -1783,6 +2019,9 @@ class Game:
             elif event.key in [pygame.K_t]:
                 self.state = GameState.TALENT
                 self.talent_selection = 0
+            elif event.key in [pygame.K_c]:
+                self.state = GameState.SYNTHESIS
+                self.synthesis_selection = 0
             elif event.key == pygame.K_ESCAPE:
                 self.state = GameState.PAUSED
                 self.menu_selection = 0
@@ -2000,13 +2239,14 @@ class Game:
             if 0 <= self.inventory_selection < len(display_items):
                 item = display_items[self.inventory_selection]
                 if hasattr(item, 'use'):
-                    if hasattr(item, 'item_type') and item.item_type == 'revive_scroll':
+                    item_type = getattr(item, 'item_type', None)
+                    if item_type in ['revive_scroll', 'teleport_anchor', 'summon_card', 'map_reveal']:
                         msg = item.use(self.player, self)
                     else:
                         msg = item.use(self.player)
                     if msg:
                         self.add_message(msg)
-                        if '无法' not in msg and '没有' not in msg:
+                        if '无法' not in msg and '没有' not in msg and '上限' not in msg:
                             self.player.remove_item(item)
                             self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
                     else:
@@ -2017,48 +2257,114 @@ class Game:
             self.state = GameState.PLAYING
     
     def handle_shop_input(self, event):
-        items = self.shop.inventory if self.shop_mode == 'buy' else self.player.inventory
-        
-        if not items:
+        if event.key in [pygame.K_LEFT, pygame.K_a]:
+            self.shop_tab = max(0, self.shop_tab - 1)
             self.shop_selection = 0
-            if event.key == pygame.K_TAB:
-                self.shop_mode = 'sell' if self.shop_mode == 'buy' else 'buy'
-                self.shop_selection = 0
-            elif event.key == pygame.K_ESCAPE:
-                self.state = GameState.PLAYING
-            return
-        
-        self.shop_selection = max(0, min(self.shop_selection, len(items) - 1))
-        
-        if event.key in [pygame.K_UP, pygame.K_w]:
-            if self.shop_selection > 0:
-                self.shop_selection -= 1
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
-            if self.shop_selection < len(items) - 1:
-                self.shop_selection += 1
-        elif event.key == pygame.K_TAB:
-            self.shop_mode = 'sell' if self.shop_mode == 'buy' else 'buy'
+        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+            self.shop_tab = min(4, self.shop_tab + 1)
             self.shop_selection = 0
-        elif event.key == pygame.K_RETURN:
-            if items and 0 <= self.shop_selection < len(items):
-                item = items[self.shop_selection]
-                if self.shop_mode == 'buy':
-                    if self.player.gold >= item.value:
-                        if self.player.add_item(item):
-                            self.player.gold -= item.value
-                            self.shop.inventory.remove(item)
-                            self.shop_selection = min(self.shop_selection, len(self.shop.inventory) - 1)
-                            self.add_message(f'购买了 {item.name}！')
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.PLAYING
+        
+        if self.shop_tab in [0, 1]:
+            items = self.shop.inventory if self.shop_tab == 0 else self.player.inventory
+            if items:
+                self.shop_selection = max(0, min(self.shop_selection, len(items) - 1))
+                
+                if event.key in [pygame.K_UP, pygame.K_w]:
+                    if self.shop_selection > 0:
+                        self.shop_selection -= 1
+                elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                    if self.shop_selection < len(items) - 1:
+                        self.shop_selection += 1
+                elif event.key == pygame.K_RETURN:
+                    if items and 0 <= self.shop_selection < len(items):
+                        item = items[self.shop_selection]
+                        if self.shop_tab == 0:
+                            price = self.shop.get_item_price(item)
+                            if self.player.gold >= price:
+                                if self.player.add_item(item):
+                                    self.player.gold -= price
+                                    self.shop.inventory.remove(item)
+                                    self.shop_selection = min(self.shop_selection, len(self.shop.inventory) - 1)
+                                    self.add_message(f'购买了 {item.name}！')
+                                else:
+                                    self.add_message('背包已满！')
+                            else:
+                                self.add_message('金币不足！')
                         else:
-                            self.add_message('背包已满！')
-                    else:
-                        self.add_message('金币不足！')
+                            sell_price = max(1, item.value // 2)
+                            self.player.gold += sell_price
+                            self.player.remove_item(item)
+                            self.shop_selection = min(self.shop_selection, len(self.player.inventory) - 1)
+                            self.add_message(f'出售了 {item.name}，获得 {sell_price} 金币！')
+        
+        elif self.shop_tab == 2:
+            if event.key == pygame.K_RETURN:
+                success, msg = self.shop.manual_refresh(self.player, self.game_mode, self.floor)
+                self.add_message(msg)
+        
+        elif self.shop_tab == 3:
+            gamble_qualities = ['common', 'uncommon', 'rare', 'epic']
+            if event.key in [pygame.K_UP, pygame.K_w]:
+                if self.gamble_selection > 0:
+                    self.gamble_selection -= 1
+            elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                if self.gamble_selection < 3:
+                    self.gamble_selection += 1
+            elif event.key == pygame.K_RETURN:
+                quality = gamble_qualities[self.gamble_selection]
+                success, msg, equip = self.shop.gamble_equipment(self.player, quality, self.floor)
+                self.add_message(msg)
+        
+        elif self.shop_tab == 4:
+            if event.key == pygame.K_RETURN:
+                if self.shop.inventory and 0 <= self.shop_selection < len(self.shop.inventory):
+                    item = self.shop.inventory[self.shop_selection]
+                    success, msg = self.shop.bargain(self.player, item)
+                    self.add_message(msg)
                 else:
-                    sell_price = max(1, item.value // 2)
-                    self.player.gold += sell_price
-                    self.player.remove_item(item)
-                    self.shop_selection = min(self.shop_selection, len(self.player.inventory) - 1)
-                    self.add_message(f'出售了 {item.name}，获得 {sell_price} 金币！')
+                    self.add_message('请先选择要砍价的物品！')
+    
+    def handle_synthesis_input(self, event):
+        quality_options = ['common', 'uncommon', 'rare', 'epic', 'legendary']
+        
+        if event.key in [pygame.K_LEFT, pygame.K_a]:
+            idx = quality_options.index(self.synthesis_quality)
+            if idx > 0:
+                self.synthesis_quality = quality_options[idx - 1]
+                self.synthesis_selection = 0
+        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+            idx = quality_options.index(self.synthesis_quality)
+            if idx < len(quality_options) - 1:
+                self.synthesis_quality = quality_options[idx + 1]
+                self.synthesis_selection = 0
+        
+        equip_by_quality = self.synthesis.get_synthesizeable_equipment(self.player.inventory)
+        materials = equip_by_quality.get(self.synthesis_quality, [])
+        
+        if materials:
+            self.synthesis_selection = max(0, min(self.synthesis_selection, len(materials) - 1))
+            if event.key in [pygame.K_UP, pygame.K_w]:
+                if self.synthesis_selection > 0:
+                    self.synthesis_selection -= 1
+            elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                if self.synthesis_selection < len(materials) - 1:
+                    self.synthesis_selection += 1
+        
+        elif event.key == pygame.K_RETURN:
+            if len(materials) >= 3:
+                success, msg, new_equip = self.synthesis.synthesize(self.synthesis_quality, self.player.inventory, self.floor)
+                if success and new_equip:
+                    self.player.inventory.append(new_equip)
+                self.add_message(msg)
+            else:
+                self.add_message('材料不足！需要3件同品质装备')
+        
+        elif event.key == pygame.K_b:
+            success, msg, results = self.synthesis.bulk_synthesize(self.synthesis_quality, self.player.inventory, self.floor)
+            self.add_message(msg)
+        
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
     

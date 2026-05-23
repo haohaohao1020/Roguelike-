@@ -225,3 +225,15 @@ class GameMap:
     
     def add_marker(self, x, y, marker_type):
         self.markers.append({'x': x, 'y': y, 'type': marker_type})
+    
+    def reveal_all(self):
+        for x in range(self.width):
+            for y in range(self.height):
+                if self.tiles[x][y] == 0:
+                    self.explored[x][y] = True
+                    self.visible[x][y] = True
+    
+    def hide_reveal(self):
+        for x in range(self.width):
+            for y in range(self.height):
+                self.visible[x][y] = False
