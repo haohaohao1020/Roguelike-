@@ -253,7 +253,7 @@ SKILLS = {
             'berserk_crit_bonus': 30,
             'berserk_damage_bonus': 0.5,
             'description': '全力劈砍造成巨额伤害，进入狂暴状态3回合，提升暴击率和伤害',
-            'unlock_level': 5,
+            'unlock_level': 1,
             'range': 1.5,
             'unstoppable': True
         }
@@ -280,7 +280,7 @@ SKILLS = {
             'slow_amount': 0.5,
             'slow_duration': 2,
             'description': '召唤大范围天火，对全场敌人造成伤害并附加灼烧和减速',
-            'unlock_level': 5,
+            'unlock_level': 1,
             'range': 999.0
         }
     },
@@ -310,7 +310,7 @@ SKILLS = {
             'crit_damage_bonus': 50,
             'crit_damage_duration': 3,
             'description': '隐身连续穿刺多段伤害，无视部分防御，结束后提升移速和暴伤',
-            'unlock_level': 5,
+            'unlock_level': 1,
             'range': 2.0
         }
     },
@@ -334,8 +334,8 @@ SKILLS = {
             'damage_multiplier': 2.0,
             'heal_amount': 0.5,
             'cleanse_negative': True,
-            'description': '全屏圣光对敌人造成神圣伤害，为队友回血并清除负面状态',
-            'unlock_level': 5,
+            'description': '全屏圣光造成神圣伤害，恢复生命并清除负面状态',
+            'unlock_level': 1,
             'range': 999.0
         }
     }

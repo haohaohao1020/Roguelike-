@@ -1,7 +1,7 @@
 import random
 from .config import *
 
-class DamageNumber:
+  class DamageNumber:
     def __init__(self, x, y, damage, is_crit=False, is_heal=False, color=None):
         self.x = x
         self.y = y
@@ -114,19 +114,22 @@ class CombatSystem:
             return False
         
         skill_data = SKILLS[user.class_type]['basic']
-        user.use_skill_mp('basic')
-        self.add_skill_effect(f'{user.class_type}_basic', user.x, user.y)
+        success = False
         
         if user.class_type == 'warrior':
-            return self._warrior_basic(user, target, skill_data)
+            success = self._warrior_basic(user, target, skill_data)
         elif user.class_type == 'mage':
-            return self._mage_basic(user, target, skill_data)
+            success = self._mage_basic(user, target, skill_data)
         elif user.class_type == 'rogue':
-            return self._rogue_basic(user, target, skill_data)
+            success = self._rogue_basic(user, target, skill_data)
         elif user.class_type == 'paladin':
-            return self._paladin_basic(user, skill_data, allies)
+            success = self._paladin_basic(user, skill_data, allies)
         
-        return True
+        if success:
+            user.use_skill_mp('basic')
+            self.add_skill_effect(f'{user.class_type}_basic', user.x, user.y)
+        
+        return success
     
     def use_ultimate_skill(self, user, target=None, all_enemies=None, allies=None):
         can_use, message = user.can_use_skill('ultimate')
@@ -135,25 +138,26 @@ class CombatSystem:
             return False
         
         skill_data = SKILLS[user.class_type]['ultimate']
-        user.use_skill_mp('ultimate')
-        self.add_skill_effect(f'{user.class_type}_ultimate', user.x, user.y, 60)
+        success = False
         
         if user.class_type == 'warrior':
-            return self._warrior_ultimate(user, target, skill_data)
+            success = self._warrior_ultimate(user, target, skill_data)
         elif user.class_type == 'mage':
-            return self._mage_ultimate(user, all_enemies, skill_data)
+            success = self._mage_ultimate(user, all_enemies, skill_data)
         elif user.class_type == 'rogue':
-            return self._rogue_ultimate(user, target, skill_data)
+            success = self._rogue_ultimate(user, target, skill_data)
         elif user.class_type == 'paladin':
-            return self._paladin_ultimate(user, all_enemies, allies, skill_data)
+            success = self._paladin_ultimate(user, all_enemies, allies, skill_data)
         
-        return True
+        if success:
+            user.use_skill_mp('ultimate')
+            self.add_skill_effect(f'{user.class_type}_ultimate', user.x, user.y, 60)
+        
+        return success
     
     def _warrior_basic(self, user, target, skill_data):
         if not target or target.get_distance_to(user) > skill_data['range']:
             self.add_log('目标不在攻击范围内！')
-            user.mp += skill_data['mp_cost']
-            user.skill_cooldowns['basic'] = 0
             return False
         
         self.add_log(f'{user.name} 使用 破甲猛击！')
@@ -189,8 +193,6 @@ class CombatSystem:
     def _warrior_ultimate(self, user, target, skill_data):
         if not target or target.get_distance_to(user) > skill_data['range']:
             self.add_log('目标不在攻击范围内！')
-            user.mp += skill_data['mp_cost']
-            user.skill_cooldowns['ultimate'] = 0
             return False
         
         self.add_log(f'{user.name} 使用 狂怒碎山斩！')
@@ -219,8 +221,6 @@ class CombatSystem:
     def _mage_basic(self, user, target, skill_data):
         if not target or target.get_distance_to(user) > skill_data['range']:
             self.add_log('目标不在攻击范围内！')
-            user.mp += skill_data['mp_cost']
-            user.skill_cooldowns['basic'] = 0
             return False
         
         self.add_log(f'{user.name} 使用 烈焰弹！')
@@ -264,8 +264,6 @@ class CombatSystem:
     def _rogue_basic(self, user, target, skill_data):
         if not target or target.get_distance_to(user) > skill_data['range']:
             self.add_log('目标不在攻击范围内！')
-            user.mp += skill_data['mp_cost']
-            user.skill_cooldowns['basic'] = 0
             return False
         
         self.add_log(f'{user.name} 使用 暗影突袭！')
@@ -293,9 +291,7 @@ class CombatSystem:
     def _rogue_ultimate(self, user, target, skill_data):
         if not target or target.get_distance_to(user) > skill_data['range']:
             self.add_log('目标不在攻击范围内！')
-            user.mp += skill_data['mp_cost']
-            user.skill_cooldowns['ultimate'] = 0
-            return False
+            return False 
         
         self.add_log(f'{user.name} 使用 影杀千刃！')
         

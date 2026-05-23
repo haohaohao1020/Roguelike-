@@ -40,6 +40,9 @@ class Entity:
         self.hurt_timer = 20
 
 class Character(Entity):
+    def is_alive(self):
+        return not self.is_dead and self.hp > 0
+    
     def __init__(self, x, y, name, class_type='warrior'):
         super().__init__(x, y, name, WHITE)
         self.class_type = class_type
@@ -109,6 +112,10 @@ class Character(Entity):
         
         self.level_up_animation = 0
         self.is_leveling_up = False
+        
+        self.is_dead = False
+        self.is_player1 = False
+        self.is_player2 = False
         
         self.talents = {
             'strength_1': False,

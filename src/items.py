@@ -238,6 +238,38 @@ class Material(Item):
         self.amount = amount
         self.value = 30
 
+class ReviveScroll(Item):
+    def __init__(self, x, y, amount=1):
+        super().__init__(x, y, '复活符', 'revive_scroll')
+        self.amount = amount
+        self.value = 500
+        self.color = (255, 200, 200)
+        self.stackable = True
+        self.item_type = 'revive_scroll'
+    
+    def use(self, user, game=None):
+        if not game or game.game_mode != 'coop':
+            return '单人模式无法使用复活符！'
+        
+        target = None
+        if hasattr(user, 'is_player1') and user.is_player1:
+            if game.player2 and not game.player2.is_alive():
+                target = game.player2
+        elif hasattr(user, 'is_player2') and user.is_player2:
+            if game.player and not game.player.is_alive():
+                target = game.player
+        
+        if not target:
+            return '没有需要复活的队友！'
+        
+        target.hp = target.get_total_max_hp()
+        target.mp = target.get_total_max_mp()
+        target.x = user.x
+        target.y = user.y
+        target.is_dead = False
+        
+        return f'复活了 {target.name}！'
+
 class Chest(Entity):
     def __init__(self, x, y, floor=1):
         super().__init__(x, y, '宝箱', GOLD)

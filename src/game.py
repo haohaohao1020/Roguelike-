@@ -152,9 +152,12 @@ class Game:
     
     def new_game(self, class_type, class_type2=None):
         self.player = Character(MAP_WIDTH // 2, MAP_HEIGHT // 2, '勇者1', class_type)
+        self.player.is_player1 = True
         self.player2 = None
         if self.game_mode == 'coop' and class_type2:
             self.player2 = Character(MAP_WIDTH // 2 + 1, MAP_HEIGHT // 2, '勇者2', class_type2)
+            self.player2.is_player2 = True
+        self.shop.refresh_items(self.game_mode)
         self.floor = 1
         self.turn = 0
         self.message_log = []
@@ -310,12 +313,17 @@ class Game:
                 monster.update_ai(self.game_map, nearest_player, self.monsters + targets)
                 
                 for target in targets:
+                    if not target.is_alive():
+                        continue
                     distance = monster.get_distance_to(target)
                     if distance <= 1.5 and monster.attack_cooldown <= 0:
                         attack_count = 1 if random.random() < 0.7 else 2
                         for _ in range(attack_count):
-                            if target.hp > 0:
+                            if target.is_alive():
                                 self.combat.attack(monster, target)
+                                if target.hp <= 0:
+                                    target.is_dead = True
+                                    self.add_message(f'{target.name} 倒下了！使用复活符复活！')
                         monster.attack_cooldown = 2
                         break
                 else:
@@ -326,7 +334,7 @@ class Game:
         
         all_dead = True
         for player in all_players:
-            if player.hp > 0:
+            if player.is_alive():
                 all_dead = False
                 break
         if all_dead:
@@ -536,28 +544,42 @@ class Game:
             self.player_renderer.skill_effect_renderer.draw_skill_effect(self.screen, effect, self.camera_x, self.camera_y)
         
         class_name = CLASSES[self.player.class_type]['name']
-        if not (hasattr(self.player, 'is_invisible') and self.player.is_invisible):
-            if class_name == '战士':
-                self.player_renderer.draw_warrior(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-            elif class_name == '法师':
-                self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-            elif class_name == '盗贼':
-                self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
-            elif class_name == '圣骑士':
-                self.player_renderer.draw_paladin(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        if self.player.is_alive():
+            if not (hasattr(self.player, 'is_invisible') and self.player.is_invisible):
+                if class_name == '战士':
+                    self.player_renderer.draw_warrior(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+                elif class_name == '法师':
+                    self.player_renderer.draw_mage(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+                elif class_name == '盗贼':
+                    self.player_renderer.draw_rogue(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+                elif class_name == '圣骑士':
+                    self.player_renderer.draw_paladin(self.screen, self.player.x, self.player.y, self.camera_x, self.camera_y, self.player.is_hurt)
+        else:
+            px = self.player.x * TILE_SIZE - int(self.camera_x)
+            py = self.player.y * TILE_SIZE - int(self.camera_y)
+            death_text = FONT_NORMAL.render('💀', True, (150, 150, 150))
+            death_rect = death_text.get_rect(center=(px + TILE_SIZE // 2, py + TILE_SIZE // 2))
+            self.screen.blit(death_text, death_rect)
         
         if self.game_mode == 'coop' and self.player2:
             if self.game_map.explored[self.player2.x][self.player2.y] and self.game_map.visible[self.player2.x][self.player2.y]:
-                class_name2 = CLASSES[self.player2.class_type]['name']
-                if not (hasattr(self.player2, 'is_invisible') and self.player2.is_invisible):
-                    if class_name2 == '战士':
-                        self.player_renderer.draw_warrior(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
-                    elif class_name2 == '法师':
-                        self.player_renderer.draw_mage(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
-                    elif class_name2 == '盗贼':
-                        self.player_renderer.draw_rogue(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
-                    elif class_name2 == '圣骑士':
-                        self.player_renderer.draw_paladin(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                if self.player2.is_alive():
+                    class_name2 = CLASSES[self.player2.class_type]['name']
+                    if not (hasattr(self.player2, 'is_invisible') and self.player2.is_invisible):
+                        if class_name2 == '战士':
+                            self.player_renderer.draw_warrior(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                        elif class_name2 == '法师':
+                            self.player_renderer.draw_mage(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                        elif class_name2 == '盗贼':
+                            self.player_renderer.draw_rogue(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                        elif class_name2 == '圣骑士':
+                            self.player_renderer.draw_paladin(self.screen, self.player2.x, self.player2.y, self.camera_x, self.camera_y, self.player2.is_hurt)
+                else:
+                    px = self.player2.x * TILE_SIZE - int(self.camera_x)
+                    py = self.player2.y * TILE_SIZE - int(self.camera_y)
+                    death_text = FONT_NORMAL.render('💀', True, (150, 150, 150))
+                    death_rect = death_text.get_rect(center=(px + TILE_SIZE // 2, py + TILE_SIZE // 2))
+                    self.screen.blit(death_text, death_rect)
         
         self.player_renderer.skill_effect_renderer.draw_damage_numbers(self.screen, self.combat.damage_numbers, self.camera_x, self.camera_y)
         
@@ -781,6 +803,18 @@ class Game:
                 px = int(minimap_rect.x + sx * scale)
                 py = int(minimap_rect.y + sy * scale)
                 pygame.draw.circle(self.screen, YELLOW, (px, py), 4)
+        
+        for room in self.game_map.rooms:
+            if room.room_type == 'shop':
+                room_center_x = (room.x1 + room.x2) // 2
+                room_center_y = (room.y1 + room.y2) // 2
+                if self.game_map.explored[room_center_x][room_center_y]:
+                    px = int(minimap_rect.x + room_center_x * scale)
+                    py = int(minimap_rect.y + room_center_y * scale)
+                    pygame.draw.rect(self.screen, (0, 255, 100), (px - 4, py - 4, 8, 8))
+                    shop_text = FONT_SMALL.render('$', True, (0, 255, 100))
+                    shop_rect = shop_text.get_rect(center=(px, py))
+                    self.screen.blit(shop_text, shop_rect)
         
         px = int(minimap_rect.x + self.player.x * scale)
         py = int(minimap_rect.y + self.player.y * scale)
@@ -1580,44 +1614,45 @@ class Game:
         if self.game_mode == 'coop' and self.player2:
             allies.append(self.player2)
         
-        if event.key in [pygame.K_UP, pygame.K_w]:
-            self.move_player(0, -1)
-        elif event.key in [pygame.K_DOWN, pygame.K_s]:
-            self.move_player(0, 1)
-        elif event.key in [pygame.K_LEFT, pygame.K_a]:
-            self.move_player(-1, 0)
-        elif event.key in [pygame.K_RIGHT, pygame.K_d]:
-            self.move_player(1, 0)
-        elif event.key == pygame.K_q:
-            if self.use_player_skill(self.player, 'basic', allies):
-                self.end_player_turn()
-        elif event.key == pygame.K_r:
-            if self.use_player_skill(self.player, 'ultimate', allies):
-                self.end_player_turn()
-        elif event.key == pygame.K_SPACE:
-            for monster in self.monsters:
-                if monster.get_distance_to(self.player) <= 1.5:
-                    attack_count = self.player.get_total_attack_count()
-                    for _ in range(attack_count):
-                        if monster.is_alive():
-                            self.combat.attack(self.player, monster)
-                    if not monster.is_alive():
-                        self.monsters.remove(monster)
+        if self.player.is_alive():
+            if event.key in [pygame.K_UP, pygame.K_w]:
+                self.move_player(0, -1)
+            elif event.key in [pygame.K_DOWN, pygame.K_s]:
+                self.move_player(0, 1)
+            elif event.key in [pygame.K_LEFT, pygame.K_a]:
+                self.move_player(-1, 0)
+            elif event.key in [pygame.K_RIGHT, pygame.K_d]:
+                self.move_player(1, 0)
+            elif event.key == pygame.K_q:
+                if self.use_player_skill(self.player, 'basic', allies):
                     self.end_player_turn()
-                    break
-        elif event.key in [pygame.K_e]:
-            self.handle_special_room_interaction()
-        elif event.key in [pygame.K_i]:
-            self.state = GameState.INVENTORY
-            self.inventory_selection = 0
-        elif event.key in [pygame.K_t]:
-            self.state = GameState.TALENT
-            self.talent_selection = 0
-        elif event.key == pygame.K_ESCAPE:
-            self.state = GameState.PAUSED
-            self.menu_selection = 0
+            elif event.key == pygame.K_r:
+                if self.use_player_skill(self.player, 'ultimate', allies):
+                    self.end_player_turn()
+            elif event.key == pygame.K_SPACE:
+                for monster in self.monsters:
+                    if monster.get_distance_to(self.player) <= 1.5:
+                        attack_count = self.player.get_total_attack_count()
+                        for _ in range(attack_count):
+                            if monster.is_alive():
+                                self.combat.attack(self.player, monster)
+                        if not monster.is_alive():
+                            self.monsters.remove(monster)
+                        self.end_player_turn()
+                        break
+            elif event.key in [pygame.K_e]:
+                self.handle_special_room_interaction()
+            elif event.key in [pygame.K_i]:
+                self.state = GameState.INVENTORY
+                self.inventory_selection = 0
+            elif event.key in [pygame.K_t]:
+                self.state = GameState.TALENT
+                self.talent_selection = 0
+            elif event.key == pygame.K_ESCAPE:
+                self.state = GameState.PAUSED
+                self.menu_selection = 0
         
-        if self.game_mode == 'coop' and self.player2:
+        if self.game_mode == 'coop' and self.player2 and self.player2.is_alive():
             if event.key == pygame.K_KP8:
                 self.move_player2(0, -1)
             elif event.key == pygame.K_KP5:
@@ -1830,10 +1865,14 @@ class Game:
             if 0 <= self.inventory_selection < len(display_items):
                 item = display_items[self.inventory_selection]
                 if hasattr(item, 'use'):
-                    msg = item.use(self.player)
+                    if hasattr(item, 'item_type') and item.item_type == 'revive_scroll':
+                        msg = item.use(self.player, self)
+                    else:
+                        msg = item.use(self.player)
                     self.add_message(msg)
-                    self.player.remove_item(item)
-                    self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
+                    if '无法' not in msg and '没有' not in msg:
+                        self.player.remove_item(item)
+                        self.inventory_selection = min(self.inventory_selection, len(display_items) - 2)
                 else:
                     self.add_message('这个物品无法使用！')
         elif event.key == pygame.K_ESCAPE:

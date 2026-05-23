@@ -64,9 +64,9 @@ class Shop:
         self.inventory = []
         self.refresh_items()
     
-    def refresh_items(self):
+    def refresh_items(self, game_mode='single'):
         self.inventory = []
-        from .items import create_random_equipment, Potion, Scroll
+        from .items import create_random_equipment, Potion, Scroll, ReviveScroll
         
         for _ in range(3):
             equip = create_random_equipment(0, 0)
@@ -80,6 +80,10 @@ class Shop:
         for _ in range(2):
             scroll = Scroll(0, 0)
             self.inventory.append(scroll)
+        
+        if game_mode == 'coop':
+            revive_scroll = ReviveScroll(0, 0)
+            self.inventory.append(revive_scroll)
     
     def buy(self, player, item):
         if player.gold >= item.value:
