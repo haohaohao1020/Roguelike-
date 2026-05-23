@@ -1,7 +1,7 @@
 import random
 from .config import *
 
-  class DamageNumber:
+class DamageNumber:
     def __init__(self, x, y, damage, is_crit=False, is_heal=False, color=None):
         self.x = x
         self.y = y
