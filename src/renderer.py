@@ -376,34 +376,37 @@ class MonsterRenderer:
         name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 18))
         screen.blit(name_text, name_rect)
     
-    def draw_dragon(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True):
+    def draw_dragon(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True, boss_name='远古巨龙', boss_color=None):
         screen_x = x * TILE_SIZE - int(camera_x)
         screen_y = y * TILE_SIZE - int(camera_y)
         
         if not visible:
             return
         
-        body_color = (150, 50, 150) if not is_hurt else (255, 255, 255)
+        body_color = boss_color if boss_color else (150, 50, 150)
+        if is_hurt:
+            body_color = (255, 255, 255)
         
         pygame.draw.ellipse(screen, body_color, (screen_x, screen_y + 6, 32, 22))
-        pygame.draw.circle(screen, (180, 70, 180), (screen_x + TILE_SIZE // 2, screen_y + 8), 14)
+        pygame.draw.circle(screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + 8), 14)
         
-        pygame.draw.polygon(screen, (120, 40, 120), [
+        pygame.draw.polygon(screen, body_color, [
             (screen_x + 5, screen_y), (screen_x, screen_y - 8), (screen_x + 10, screen_y + 3)
         ])
-        pygame.draw.polygon(screen, (120, 40, 120), [
+        pygame.draw.polygon(screen, body_color, [
             (screen_x + 27, screen_y), (screen_x + 32, screen_y - 8), (screen_x + 22, screen_y + 3)
         ])
         
+        eye_color = (255, 255, 0)
         pygame.draw.circle(screen, (255, 100, 0), (screen_x + 11, screen_y + 6), 5)
         pygame.draw.circle(screen, (255, 100, 0), (screen_x + 21, screen_y + 6), 5)
-        pygame.draw.circle(screen, (255, 255, 0), (screen_x + 11, screen_y + 6), 2)
-        pygame.draw.circle(screen, (255, 255, 0), (screen_x + 21, screen_y + 6), 2)
+        pygame.draw.circle(screen, eye_color, (screen_x + 11, screen_y + 6), 2)
+        pygame.draw.circle(screen, eye_color, (screen_x + 21, screen_y + 6), 2)
         
-        pygame.draw.polygon(screen, (180, 70, 180), [
+        pygame.draw.polygon(screen, body_color, [
             (screen_x, screen_y + 16), (screen_x - 6, screen_y + 20), (screen_x, screen_y + 24)
         ])
-        pygame.draw.polygon(screen, (180, 70, 180), [
+        pygame.draw.polygon(screen, body_color, [
             (screen_x + 32, screen_y + 16), (screen_x + 38, screen_y + 20), (screen_x + 32, screen_y + 24)
         ])
         
@@ -413,8 +416,136 @@ class MonsterRenderer:
         
         self.draw_health_bar(screen, screen_x, screen_y - 12, hp, max_hp, True)
         
-        name_text = FONT_NORMAL.render('🐉 远古巨龙', True, (255, 150, 255))
+        name_text = FONT_NORMAL.render(f'👑 {boss_name}', True, body_color)
         name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 26))
+        screen.blit(name_text, name_rect)
+    
+    def draw_summoner(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        if not visible:
+            return
+        
+        body_color = (150, 50, 150) if not is_hurt else (255, 255, 255)
+        
+        pygame.draw.polygon(screen, (100, 30, 100), [
+            (screen_x + TILE_SIZE // 2, screen_y - 4),
+            (screen_x + 2, screen_y + 14),
+            (screen_x + TILE_SIZE - 2, screen_y + 14)
+        ])
+        pygame.draw.circle(screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + 18), 10)
+        
+        pygame.draw.circle(screen, (200, 100, 255), (screen_x + 12, screen_y + 16), 3)
+        pygame.draw.circle(screen, (200, 100, 255), (screen_x + 20, screen_y + 16), 3)
+        
+        pygame.draw.line(screen, (100, 50, 150), (screen_x + 26, screen_y + 4), (screen_x + 28, screen_y - 4), 3)
+        pygame.draw.circle(screen, (200, 100, 255), (screen_x + 28, screen_y - 4), 5)
+        
+        summon_glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(summon_glow, (150, 50, 200, 50), (TILE_SIZE // 2, TILE_SIZE // 2), 16)
+        screen.blit(summon_glow, (screen_x, screen_y))
+        
+        self.draw_health_bar(screen, screen_x, screen_y - 8, hp, max_hp)
+        
+        name_text = FONT_SMALL.render('召唤法师', True, (200, 150, 255))
+        name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 18))
+        screen.blit(name_text, name_rect)
+    
+    def draw_summon_minion(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        if not visible:
+            return
+        
+        body_color = (100, 100, 150) if not is_hurt else (255, 255, 255)
+        
+        pygame.draw.ellipse(screen, body_color, (screen_x + 6, screen_y + 16, 20, 12))
+        pygame.draw.ellipse(screen, (80, 80, 120), (screen_x + 8, screen_y + 8, 16, 12))
+        
+        pygame.draw.circle(screen, (200, 50, 50), (screen_x + 13, screen_y + 12), 2)
+        pygame.draw.circle(screen, (200, 50, 50), (screen_x + 19, screen_y + 12), 2)
+        
+        self.draw_health_bar(screen, screen_x, screen_y - 8, hp, max_hp)
+        
+        name_text = FONT_SMALL.render('召唤小弟', True, (150, 150, 200))
+        name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 18))
+        screen.blit(name_text, name_rect)
+    
+    def draw_invisible_monster(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True, is_invisible=False):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        if not visible:
+            return
+        
+        if is_invisible:
+            invisible_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            pygame.draw.circle(invisible_surf, (100, 200, 255, 80), (TILE_SIZE // 2, TILE_SIZE // 2), 12)
+            pygame.draw.circle(invisible_surf, (150, 220, 255, 50), (TILE_SIZE // 2, TILE_SIZE // 2), 16)
+            screen.blit(invisible_surf, (screen_x, screen_y))
+            
+            status_text = FONT_SMALL.render('👻 隐身中', True, (100, 200, 255))
+            status_rect = status_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 8))
+            screen.blit(status_text, status_rect)
+            return
+        
+        body_color = (100, 200, 255) if not is_hurt else (255, 255, 255)
+        
+        pygame.draw.ellipse(screen, body_color, (screen_x + 4, screen_y + 14, 24, 14))
+        pygame.draw.ellipse(screen, (80, 180, 230), (screen_x + 6, screen_y + 6, 20, 14))
+        
+        pygame.draw.circle(screen, (200, 255, 255), (screen_x + 12, screen_y + 11), 3)
+        pygame.draw.circle(screen, (200, 255, 255), (screen_x + 20, screen_y + 11), 3)
+        
+        pygame.draw.line(screen, (80, 180, 230), (screen_x + 26, screen_y + 10), (screen_x + 32, screen_y + 18), 2)
+        
+        ghost_trail = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(ghost_trail, (100, 200, 255, 30), (TILE_SIZE // 2, TILE_SIZE // 2), 18)
+        screen.blit(ghost_trail, (screen_x, screen_y))
+        
+        self.draw_health_bar(screen, screen_x, screen_y - 8, hp, max_hp)
+        
+        name_text = FONT_SMALL.render('幽灵刺客', True, (150, 220, 255))
+        name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 18))
+        screen.blit(name_text, name_rect)
+    
+    def draw_reviver(self, screen, x, y, camera_x, camera_y, hp, max_hp, is_hurt=False, visible=True, is_down=False, revive_count=0):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        if not visible:
+            return
+        
+        if is_down:
+            pygame.draw.ellipse(screen, (100, 80, 80), (screen_x + 2, screen_y + 20, 28, 10))
+            pygame.draw.circle(screen, (80, 60, 60), (screen_x + 8, screen_y + 18), 6)
+            
+            revive_glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            alpha = int(100 + 50 * pygame.time.get_ticks() / 300 % 1)
+            pygame.draw.circle(revive_glow, (150, 100, 100, alpha), (TILE_SIZE // 2, TILE_SIZE // 2), 20)
+            screen.blit(revive_glow, (screen_x, screen_y))
+            
+            revive_text = FONT_SMALL.render(f'💀 复活中 {revive_count}/2', True, (200, 150, 150))
+            revive_rect = revive_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 8))
+            screen.blit(revive_text, revive_rect)
+            return
+        
+        body_color = (150, 100, 100) if not is_hurt else (255, 255, 255)
+        
+        pygame.draw.ellipse(screen, body_color, (screen_x + 4, screen_y + 12, 24, 18))
+        pygame.draw.rect(screen, (120, 80, 80), (screen_x + 6, screen_y + 4, 20, 14))
+        
+        pygame.draw.circle(screen, (180, 100, 100), (screen_x + 12, screen_y + 9), 3)
+        pygame.draw.circle(screen, (180, 100, 100), (screen_x + 20, screen_y + 9), 3)
+        
+        pygame.draw.line(screen, (80, 50, 50), (screen_x + 10, screen_y + 15), (screen_x + 22, screen_y + 15), 2)
+        
+        self.draw_health_bar(screen, screen_x, screen_y - 8, hp, max_hp)
+        
+        name_text = FONT_SMALL.render(f'不死战士 ({2-revive_count})', True, (200, 150, 150))
+        name_rect = name_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 18))
         screen.blit(name_text, name_rect)
     
     def draw_health_bar(self, screen, x, y, hp, max_hp, is_boss=False):

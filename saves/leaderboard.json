@@ -11,6 +11,11 @@
   },
   {
     "name": "勇者1",
+    "score": 1500,
+    "floor": 2
+  },
+  {
+    "name": "勇者1",
     "score": 1200,
     "floor": 2
   },
@@ -26,22 +31,17 @@
   },
   {
     "name": "勇者1",
+    "score": 800,
+    "floor": 1
+  },
+  {
+    "name": "勇者1",
     "score": 700,
     "floor": 1
   },
   {
-    "name": "勇者",
-    "score": 600,
-    "floor": 1
-  },
-  {
-    "name": "勇者",
-    "score": 600,
-    "floor": 1
-  },
-  {
-    "name": "勇者",
-    "score": 600,
+    "name": "勇者1",
+    "score": 700,
     "floor": 1
   },
   {

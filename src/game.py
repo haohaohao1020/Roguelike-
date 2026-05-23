@@ -105,17 +105,16 @@ class Game:
                 x, y = room.center()
                 self.items.append(Chest(x, y, self.floor))
             elif room.room_type == 'boss':
-                if self.floor >= MAX_FLOOR:
-                    x, y = room.center()
-                    boss = create_boss(x, y, self.floor)
-                    self.monsters.append(boss)
-                else:
-                    if random.random() < 0.4:
-                        x, y = room.get_random_position()
-                        elite = create_elite(x, y, self.floor)
+                x, y = room.center()
+                boss = create_boss(x, y, self.floor)
+                self.monsters.append(boss)
+                if random.random() < 0.4:
+                    ex, ey = room.get_random_position()
+                    if (ex, ey) != (x, y):
+                        elite = create_elite(ex, ey, self.floor)
                         self.monsters.append(elite)
                         if self.game_mode == 'coop' and random.random() < 0.5:
-                            elite2 = create_elite(x + 2, y, self.floor)
+                            elite2 = create_elite(ex + 2, ey, self.floor)
                             self.monsters.append(elite2)
         
         for room in self.game_map.rooms:
@@ -314,6 +313,8 @@ class Game:
         if self.game_mode == 'coop' and self.player2:
             all_players.append(self.player2)
         
+        alive_players = [p for p in all_players if p.is_alive()]
+        
         for player in all_players:
             if player.is_alive():
                 status_messages = player.update_status_effects()
@@ -323,34 +324,102 @@ class Game:
                 player.update_skill_cooldowns()
                 player.update_buff_durations()
         
-        targets = all_players
-        
+        new_summons = []
         for monster in self.monsters:
-            if monster.is_alive():
-                monster.update_status_effects()
+            if hasattr(monster, 'summons') and monster.summons:
+                for summon in monster.summons:
+                    if summon not in self.monsters:
+                        new_summons.append(summon)
+                monster.summons = []
+        self.monsters.extend(new_summons)
+        
+        monsters_to_process = [m for m in self.monsters if m.is_alive()]
+        
+        for monster in monsters_to_process:
+            if not monster.is_alive():
+                continue
                 
-                nearest_player = min(targets, key=lambda p: monster.get_distance_to(p))
-                monster.update_ai(self.game_map, nearest_player, self.monsters + targets)
+            monster.update_status_effects()
+            
+            monster.update_ai(self.game_map, self.player, self.monsters + alive_players, alive_players)
+            
+            target = None
+            if alive_players:
+                target = min(alive_players, key=lambda p: monster.get_distance_to(p))
+            
+            if target and monster.is_aggro:
+                distance = monster.get_distance_to(target)
                 
-                for target in targets:
-                    if not target.is_alive():
-                        continue
-                    distance = monster.get_distance_to(target)
-                    if distance <= 1.5 and monster.attack_cooldown <= 0:
+                if hasattr(monster, 'monster_type') and monster.monster_type == 'elite':
+                    if distance <= 2 and hasattr(monster, 'use_knockback'):
+                        if random.random() < 0.3:
+                            success = monster.use_knockback(target, self.game_map)
+                            if success:
+                                self.add_message(f'{monster.name} 发动了击退攻击！')
+                                self.combat.add_skill_effect('knockback', monster.x, monster.y, 20)
+                
+                if distance <= 1.5 and monster.attack_cooldown <= 0:
+                    if not hasattr(monster, 'is_invisible') or not monster.is_invisible:
                         attack_count = 1 if random.random() < 0.7 else 2
+                        if hasattr(monster, 'monster_type') and monster.monster_type == 'boss':
+                            attack_count = 2 if random.random() < 0.5 else 3
+                        
                         for _ in range(attack_count):
                             if target.is_alive():
                                 self.combat.attack(monster, target)
                                 if target.hp <= 0:
                                     target.is_dead = True
                                     self.add_message(f'{target.name} 倒下了！使用复活符复活！')
-                        monster.attack_cooldown = 2
-                        break
+                                    alive_players = [p for p in all_players if p.is_alive()]
+                        
+                        monster.attack_cooldown = 2 if monster.monster_type != 'boss' else 1
                 else:
                     if monster.attack_cooldown > 0:
                         monster.attack_cooldown -= 1
-                
-                self.game_map.apply_terrain_effect(monster, monster.x, monster.y)
+            
+            self.game_map.apply_terrain_effect(monster, monster.x, monster.y)
+        
+        dead_monsters = []
+        for monster in self.monsters:
+            if hasattr(monster, 'should_remove') and monster.should_remove():
+                dead_monsters.append(monster)
+            elif not hasattr(monster, 'is_alive'):
+                if monster.hp <= 0:
+                    dead_monsters.append(monster)
+            elif not monster.is_alive() and not hasattr(monster, 'is_down'):
+                dead_monsters.append(monster)
+            elif hasattr(monster, 'is_down') and monster.is_down == False and monster.hp <= 0:
+                dead_monsters.append(monster)
+        
+        for monster in dead_monsters:
+            if hasattr(monster, 'master') and monster.master:
+                if hasattr(monster.master, 'summons'):
+                    if monster in monster.master.summons:
+                        monster.master.summons.remove(monster)
+            
+            if hasattr(monster, 'summons'):
+                for summon in monster.summons:
+                    if summon in self.monsters:
+                        self.monsters.remove(summon)
+            
+            if hasattr(monster, 'drop_loot'):
+                drops = monster.drop_loot()
+                for drop in drops:
+                    drop.x = monster.x
+                    drop.y = monster.y
+                    self.items.append(drop)
+                    quality_name = QUALITY_NAMES.get(drop.quality, '普通')
+                    self.add_message(f'{monster.name} 掉落了 {quality_name} {drop.name}！')
+            
+            if monster in self.monsters:
+                self.monsters.remove(monster)
+            
+            if hasattr(monster, 'exp'):
+                self.player.gain_exp(monster.exp)
+                self.add_message(f'获得了 {monster.exp} 经验！')
+            if hasattr(monster, 'gold'):
+                self.player.gold += monster.gold
+                self.add_message(f'获得了 {monster.gold} 金币！')
         
         all_dead = True
         for player in all_players:
@@ -371,10 +440,6 @@ class Game:
                     player.buffs.remove(buff)
         
         self.combat.update()
-        
-        all_players = [self.player]
-        if self.game_mode == 'coop' and self.player2:
-            all_players.append(self.player2)
         
         for player in all_players:
             if player.level_up_animation > 0:
@@ -538,25 +603,54 @@ class Game:
             if self.game_map.explored[item.x][item.y] and self.game_map.visible[item.x][item.y]:
                 if hasattr(item, 'is_open'):
                     self.dungeon_renderer.draw_chest(self.screen, item.x, item.y, self.camera_x, self.camera_y, item.is_open, True)
-                elif hasattr(item, 'amount'):
+                elif hasattr(item, 'amount') and hasattr(item, 'item_type') and item.item_type == 'gold':
                     self.dungeon_renderer.draw_gold(self.screen, item.x, item.y, self.camera_x, self.camera_y, item.amount, True)
+                elif hasattr(item, 'item_type') and item.item_type == 'equipment':
+                    screen_x = item.x * TILE_SIZE - int(self.camera_x)
+                    screen_y = item.y * TILE_SIZE - int(self.camera_y)
+                    quality_color = QUALITY_BORDER_COLORS.get(item.quality, GRAY)
+                    pygame.draw.rect(self.screen, quality_color, (screen_x + 8, screen_y + 8, 16, 16))
+                    pygame.draw.rect(self.screen, (255, 255, 255), (screen_x + 8, screen_y + 8, 16, 16), 1)
+                elif hasattr(item, 'item_type') and item.item_type == 'potion':
+                    screen_x = item.x * TILE_SIZE - int(self.camera_x)
+                    screen_y = item.y * TILE_SIZE - int(self.camera_y)
+                    pygame.draw.circle(self.screen, (255, 100, 100), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 8)
+                    pygame.draw.circle(self.screen, (200, 50, 50), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 5)
+                elif hasattr(item, 'item_type') and item.item_type == 'scroll':
+                    screen_x = item.x * TILE_SIZE - int(self.camera_x)
+                    screen_y = item.y * TILE_SIZE - int(self.camera_y)
+                    pygame.draw.rect(self.screen, (200, 200, 200), (screen_x + 8, screen_y + 6, 16, 20))
+                    pygame.draw.rect(self.screen, (150, 150, 150), (screen_x + 8, screen_y + 6, 16, 20), 1)
         
         for monster in self.monsters:
             if self.game_map.explored[monster.x][monster.y] and self.game_map.visible[monster.x][monster.y]:
                 if monster.monster_type == 'boss':
-                    self.monster_renderer.draw_dragon(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    boss_name = monster.name
+                    boss_color = monster.color
+                    self.monster_renderer.draw_dragon(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True, boss_name, boss_color)
                 elif monster.monster_type == 'elite':
                     self.monster_renderer.draw_elite_orc(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
                 else:
                     monster_name = monster.name
                     if '哥布林' in monster_name:
                         self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
-                    elif '兽人' in monster_name:
+                    elif '兽人' in monster_name and '精英' not in monster_name:
                         self.monster_renderer.draw_orc(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
                     elif '骷髅' in monster_name:
                         self.monster_renderer.draw_skeleton(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
-                    elif '法师' in monster_name:
+                    elif '黑暗法师' in monster_name:
                         self.monster_renderer.draw_mage(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '召唤法师' in monster_name:
+                        self.monster_renderer.draw_summoner(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '召唤小弟' in monster_name:
+                        self.monster_renderer.draw_summon_minion(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+                    elif '幽灵刺客' in monster_name:
+                        is_invisible = hasattr(monster, 'is_invisible') and monster.is_invisible
+                        self.monster_renderer.draw_invisible_monster(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True, is_invisible)
+                    elif '不死战士' in monster_name:
+                        is_down = hasattr(monster, 'is_down') and monster.is_down
+                        revive_count = monster.revive_count if hasattr(monster, 'revive_count') else 0
+                        self.monster_renderer.draw_reviver(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True, is_down, revive_count)
                     else:
                         self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
         
