@@ -63,6 +63,27 @@ class Monster(Entity):
     def is_alive(self):
         return self.hp > 0
     
+    def get_total_defense(self):
+        return self.defense
+    
+    def get_total_magic_defense(self):
+        return self.defense // 2
+    
+    def get_total_physical_defense(self):
+        return self.defense
+    
+    def get_lifesteal(self):
+        return 0
+    
+    def get_manasteal(self):
+        return 0
+    
+    def get_crit_chance(self):
+        return 5
+    
+    def get_crit_damage(self):
+        return 150
+    
     def update_ai(self, game_map, player, entities):
         if self.frozen > 0:
             self.frozen -= 1

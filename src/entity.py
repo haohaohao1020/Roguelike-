@@ -654,6 +654,10 @@ class Character(Entity):
             return self.armor_reduction_targets[target_id]['amount']
         return 0
     
+    def clear_negative_status(self):
+        negative_statuses = ['burning', 'poison', 'slowed', 'stunned', 'frozen']
+        self.status_effects = [s for s in self.status_effects if s['type'] not in negative_statuses]
+    
     def can_use_skill(self, skill_type):
         if self.has_status('stunned') or self.has_status('frozen'):
             return False, '被控制无法释放技能'

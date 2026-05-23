@@ -59,14 +59,14 @@ class CombatSystem:
         is_crit = False
         crit_chance = attacker.get_total_critical_chance() if hasattr(attacker, 'get_total_critical_chance') else 5
         if hasattr(attacker, 'is_berserk') and attacker.is_berserk:
-            crit_chance += SKILLS['warrior']['ultimate']['berserk_crit_bonus']
+            crit_chance += 30
         
         if random.randint(0, 100) < crit_chance:
             is_crit = True
             crit_damage = attacker.get_total_critical_damage() if hasattr(attacker, 'get_total_critical_damage') else 150
             damage = int(damage * crit_damage / 100)
             if hasattr(attacker, 'is_berserk') and attacker.is_berserk:
-                damage = int(damage * (1 + SKILLS['warrior']['ultimate']['berserk_damage_bonus']))
+                damage = int(damage * 1.5)
         
         damage = max(1, damage)
         
@@ -76,13 +76,12 @@ class CombatSystem:
             target.hp -= damage
             actual_damage = damage
         
-        if hasattr(attacker, 'physical_lifesteal') or hasattr(attacker, 'get_sub_stats'):
-            if hasattr(attacker, 'get_sub_stats'):
-                lifesteal = attacker.get_sub_stats().get('physical_lifesteal', 0) / 100
-                if lifesteal > 0 and hasattr(attacker, 'heal'):
-                    heal_amount = int(actual_damage * lifesteal)
-                    attacker.heal(heal_amount)
-                    self.add_log(f'{attacker.name} 吸血 {heal_amount} 点生命！')
+        if hasattr(attacker, 'get_lifesteal'):
+            lifesteal = attacker.get_lifesteal() / 100
+            if lifesteal > 0 and hasattr(attacker, 'heal'):
+                heal_amount = int(actual_damage * lifesteal)
+                attacker.heal(heal_amount)
+                self.add_log(f'{attacker.name} 吸血 {heal_amount} 点生命！')
         
         self.add_damage_number(target.x, target.y, actual_damage, is_crit)
         
@@ -97,41 +96,16 @@ class CombatSystem:
         
         return True
     
-    def magic_attack(self, caster, target, spell_name, base_damage, is_crit=False):
-        magic_power = caster.get_magic_power() if hasattr(caster, 'get_magic_power') else base_damage
-        damage = int((magic_power + base_damage) * (0.8 + random.random() * 0.4))
-        
-        if is_crit:
-            crit_damage = caster.get_total_critical_damage() if hasattr(caster, 'get_total_critical_damage') else 150
-            damage = int(damage * crit_damage / 100)
-        
-        if hasattr(target, 'take_damage'):
-            actual_damage = target.take_damage(damage)
-        else:
-            target.hp -= damage
-            actual_damage = damage
-        
-        self.add_log(f'{caster.name} 使用 {spell_name}！')
-        self.add_damage_number(target.x, target.y, actual_damage, is_crit)
-        
-        if hasattr(target, 'is_alive'):
-            if not target.is_alive():
-                self.handle_death(caster, target)
-        elif target.hp <= 0:
-            self.handle_death(caster, target)
-        
-        return True
-    
     def handle_death(self, killer, victim):
         self.add_log(f'{victim.name} 被击败了！')
         
         if hasattr(killer, 'gain_exp') and hasattr(victim, 'exp'):
             killer.gain_exp(victim.exp)
-            self.add_log(f'{killer.name} 获得了经验！')
+            self.add_log(f'{killer.name} 获得了 {victim.exp} 经验！')
         
         if hasattr(killer, 'gold') and hasattr(victim, 'gold'):
             killer.gold += victim.gold
-            self.add_log(f'{killer.name} 获得了金币！')
+            self.add_log(f'{killer.name} 获得了 {victim.gold} 金币！')
     
     def use_basic_skill(self, user, target=None, all_enemies=None, allies=None):
         can_use, message = user.can_use_skill('basic')
@@ -297,17 +271,19 @@ class CombatSystem:
         self.add_log(f'{user.name} 使用 暗影突袭！')
         
         base_damage = user.get_total_physical_attack() * skill_data['damage_multiplier']
+        is_crit = True
+        
         crit_damage = user.get_total_critical_damage()
         base_damage = int(base_damage * crit_damage / 100)
         
         damage = max(1, int(base_damage - target.get_total_defense() // 2))
         actual = target.take_damage(damage)
         
-        user.evasion_bonus = skill_data['evasion_bonus']
+        user.evasion_bonus += skill_data['evasion_bonus']
         user.evasion_bonus_duration = skill_data['evasion_duration']
         
-        self.add_damage_number(target.x, target.y, actual, True, color=(100, 255, 100))
-        self.add_log(f'背刺造成 {actual} 点暴击伤害！闪避率提升30%！')
+        self.add_damage_number(target.x, target.y, actual, is_crit, color=(100, 255, 100))
+        self.add_log(f'背刺造成 {actual} 点暴击伤害！闪避率提升！')
         
         if hasattr(target, 'is_alive') and not target.is_alive():
             self.handle_death(user, target)
@@ -327,7 +303,11 @@ class CombatSystem:
         user.invisible_duration = skill_data['invisible_duration']
         
         total_damage = 0
-        for i in range(skill_data['hit_count']):
+        hit_count = skill_data['hit_count']
+        for i in range(hit_count):
+            if not target.is_alive():
+                break
+            
             base_damage = user.get_total_physical_attack() * skill_data['damage_multiplier']
             is_crit = random.randint(0, 100) < (user.get_total_critical_chance() + 30)
             
@@ -343,9 +323,6 @@ class CombatSystem:
             self.add_damage_number(target.x + random.uniform(-0.3, 0.3), 
                                    target.y + random.uniform(-0.3, 0.3), 
                                    actual, is_crit, color=(150, 255, 150))
-            
-            if not target.is_alive():
-                break
         
         user.speed_bonus = skill_data['speed_bonus']
         user.speed_bonus_duration = skill_data['speed_duration']
@@ -395,14 +372,13 @@ class CombatSystem:
         
         if allies:
             for ally in allies:
-                if ally != user and ally.is_alive() and hasattr(ally, 'heal'):
-                    ally_heal = int(heal_amount * 0.5)
-                    ally.heal(ally_heal)
-                    self.add_damage_number(ally.x, ally.y, ally_heal, is_heal=True, color=(150, 255, 150))
+                if ally != user and ally.is_alive():
+                    ally.heal(int(heal_amount * 0.5))
+                    self.add_damage_number(ally.x, ally.y, int(heal_amount * 0.5), is_heal=True, color=(150, 255, 150))
         
-        user.status_effects = [s for s in user.status_effects if s['type'] in ['haste', 'shield']]
+        user.clear_negative_status()
         
-        self.add_log(f'对敌人造成共 {total_damage} 点神圣伤害！恢复 {heal_amount} 生命并清除负面状态！')
+        self.add_log(f'造成 {total_damage} 点神圣伤害，恢复 {heal_amount} 点生命！清除负面状态！')
         return True
     
     def add_log(self, message):
