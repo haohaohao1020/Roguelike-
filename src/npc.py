@@ -1,7 +1,27 @@
 import random
 from .config import *
 from .entity import Entity
-from .items import create_random_equipment, Gold, Potion, Rune, Material
+from .items import create_random_equipment, Gold, Potion, Rune, Material, Item
+
+class QuestItem(Item):
+    def __init__(self, x, y, quest_id, item_name, item_type='quest'):
+        super().__init__(x, y, item_name, 'quest_item')
+        self.quest_id = quest_id
+        self.quest_item_type = item_type
+        self.color = (255, 200, 100)
+    
+    def get_color(self):
+        return self.color
+
+class DeliveryLetter(Item):
+    def __init__(self, x, y, target_floor, target_npc_name):
+        super().__init__(x, y, '重要信件', 'delivery_letter')
+        self.target_floor = target_floor
+        self.target_npc_name = target_npc_name
+        self.color = (200, 200, 255)
+    
+    def get_color(self):
+        return self.color
 
 class NPC(Entity):
     def __init__(self, x, y, npc_type='merchant'):
@@ -49,6 +69,7 @@ class Quest:
     def __init__(self, quest_type, floor=1):
         self.quest_type = quest_type
         self.floor = floor
+        self.quest_id = f"{quest_type}_{floor}_{random.randint(1000, 9999)}"
         self.quest_name = self.generate_name()
         self.name = self.quest_name
         self.description = ''
@@ -56,9 +77,13 @@ class Quest:
         self.is_accepted = False
         self.is_completed = False
         self.is_abandoned = False
+        self.is_failed = False
         self.progress = 0
         self.target = 1
         self.target_data = {}
+        self.target_positions = []
+        self.is_floor_locked = False
+        self.spawned_items = []
         self.generate_quest()
     
     def generate_name(self):
@@ -75,14 +100,18 @@ class Quest:
         self.generate_rewards()
     
     def generate_delivery_quest(self):
-        self.description = f'将一封重要信件交给第{min(self.floor + 1, MAX_FLOOR)}层的NPC'
+        self.is_floor_locked = True
+        target_npc_name = random.choice(NPC_NAMES)
+        self.description = f'将重要信件交给本层的 {target_npc_name}'
         self.target = 1
         self.target_data = {
             'item_name': '重要信件',
-            'target_floor': min(self.floor + 1, MAX_FLOOR)
+            'target_floor': self.floor,
+            'target_npc': target_npc_name
         }
     
     def generate_hunt_quest(self):
+        self.is_floor_locked = False
         monster_counts = [3, 5, 8, 10]
         self.target = random.choice(monster_counts)
         monster_type = random.choice(list(MONSTER_NAMES_CN.keys()))
@@ -94,12 +123,14 @@ class Quest:
         }
     
     def generate_collect_quest(self):
+        self.is_floor_locked = True
         collect_items = ['神秘碎片', '古老宝石', '魔法结晶', '稀有矿石', '符文残片']
         item = random.choice(collect_items)
-        self.target = random.randint(3, 8)
-        self.description = f'收集 {self.target} 个 {item}'
+        self.target = random.randint(3, 6)
+        self.description = f'在本层收集 {self.target} 个 {item}'
         self.target_data = {
-            'item_type': item
+            'item_type': item,
+            'item_name': item
         }
     
     def generate_rewards(self):
@@ -165,6 +196,8 @@ class Quest:
         return self.is_accepted and self.progress >= self.target
     
     def get_progress_text(self):
+        if self.is_failed:
+            return '任务失败'
         if self.quest_type == 'hunt':
             monster_name = self.target_data.get('monster_name', '怪物')
             return f'击杀 {self.progress}/{self.target} {monster_name}'
@@ -174,11 +207,65 @@ class Quest:
         elif self.quest_type == 'delivery':
             return '送信任务' if self.progress == 0 else '已送达'
         return f'{self.progress}/{self.target}'
+    
+    def set_target_position(self, x, y):
+        self.target_positions = [(x, y)]
+    
+    def set_target_positions(self, positions):
+        self.target_positions = positions
+    
+    def fail(self):
+        self.is_failed = True
+        self.is_accepted = False
+    
+    def is_active(self):
+        return self.is_accepted and not self.is_completed and not self.is_abandoned and not self.is_failed
+    
+    def spawn_collect_items(self, game_map, rooms):
+        if self.quest_type != 'collect':
+            return []
+        
+        items = []
+        item_name = self.target_data.get('item_name', '任务物品')
+        available_rooms = [r for r in rooms if r.room_type == 'normal']
+        
+        for i in range(self.target):
+            if available_rooms:
+                room = random.choice(available_rooms)
+                x, y = room.get_random_position()
+                item = QuestItem(x, y, self.quest_id, item_name, 'collect')
+                items.append(item)
+                self.target_positions.append((x, y))
+        
+        self.spawned_items = items
+        return items
+    
+    def on_item_collected(self, quest_item):
+        if self.quest_type == 'collect' and quest_item.quest_id == self.quest_id:
+            self.progress += 1
+            if quest_item in self.spawned_items:
+                self.spawned_items.remove(quest_item)
+            if (quest_item.x, quest_item.y) in self.target_positions:
+                self.target_positions.remove((quest_item.x, quest_item.y))
+            if self.progress >= self.target:
+                self.is_completed = True
+            return True
+        return False
+    
+    def check_delivery_target(self, npc):
+        if self.quest_type == 'delivery':
+            target_npc = self.target_data.get('target_npc', '')
+            if npc.name == target_npc:
+                self.progress = 1
+                self.is_completed = True
+                return True
+        return False
 
 class QuestManager:
     def __init__(self):
         self.active_quests = []
         self.completed_quests = []
+        self.failed_quests = []
         self.max_active_quests = 5
         self.quest_history = set()
     
@@ -229,20 +316,50 @@ class QuestManager:
             return True, '已放弃任务'
         return False, '找不到该任务'
     
-    def update_hunt_progress(self, monster_type):
-        for quest in self.active_quests:
-            if quest.quest_type == 'hunt':
-                quest.update_progress({'monster_type': monster_type})
+    def fail_quest(self, quest):
+        if quest in self.active_quests:
+            quest.fail()
+            self.active_quests.remove(quest)
+            self.failed_quests.append(quest)
+            return True
+        return False
     
-    def update_collect_progress(self):
-        for quest in self.active_quests:
-            if quest.quest_type == 'collect':
-                quest.update_progress()
+    def fail_floor_locked_quests(self, current_floor):
+        failed_quests = []
+        for quest in self.active_quests[:]:
+            if quest.is_floor_locked and quest.floor < current_floor:
+                self.fail_quest(quest)
+                failed_quests.append(quest)
+        return failed_quests
     
-    def update_delivery_progress(self, floor):
+    def update_hunt_progress(self, monster_type, monster_name=None):
         for quest in self.active_quests:
-            if quest.quest_type == 'delivery':
-                quest.update_progress({'floor': floor})
+            if quest.quest_type == 'hunt' and quest.is_active():
+                quest_monster_type = quest.target_data.get('monster_type', '')
+                quest_monster_name = quest.target_data.get('monster_name', '')
+                if monster_type == quest_monster_type or (monster_name and quest_monster_name in monster_name):
+                    quest.progress += 1
+                    if quest.progress >= quest.target:
+                        quest.is_completed = True
+    
+    def update_collect_progress(self, quest_item):
+        for quest in self.active_quests:
+            if quest.quest_type == 'collect' and quest.is_active():
+                if quest.on_item_collected(quest_item):
+                    return True
+        return False
+    
+    def check_delivery_quests(self, npc, player):
+        for quest in self.active_quests:
+            if quest.quest_type == 'delivery' and quest.is_active():
+                if quest.check_delivery_target(npc):
+                    if hasattr(player, 'inventory'):
+                        for item in player.inventory[:]:
+                            if hasattr(item, 'item_type') and item.item_type == 'delivery_letter':
+                                player.inventory.remove(item)
+                                break
+                    return True, quest
+        return False, None
     
     def get_completed_quests_count(self):
         return len(self.completed_quests)
@@ -251,10 +368,18 @@ class QuestManager:
         return len(self.completed_quests) + len(self.active_quests)
     
     def get_active_quests(self):
-        return self.active_quests
+        return [q for q in self.active_quests if q.is_active()]
     
     def can_complete_quest(self, quest):
         return quest.is_completed and quest in self.active_quests
+    
+    def get_quest_target_positions(self):
+        positions = []
+        for quest in self.active_quests:
+            if quest.is_active():
+                for pos in quest.target_positions:
+                    positions.append((pos, quest.quest_type))
+        return positions
 
 def create_random_npc(x, y, floor=1):
     npc_types = ['merchant', 'hunter', 'mage', 'healer']

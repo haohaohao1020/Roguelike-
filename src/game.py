@@ -10,7 +10,7 @@ from .save_manager import SaveManager, Shop
 from .asset_loader import asset_loader
 from .renderer import DungeonRenderer, MonsterRenderer, PlayerRenderer
 from .items import SynthesisSystem
-from .npc import create_random_npc, QuestManager
+from .npc import create_random_npc, QuestManager, DeliveryLetter
 from .behavior_tracker import BehaviorTracker, EndingSystem
 
 class GameState:
@@ -287,9 +287,19 @@ class Game:
         if self.floor >= MAX_FLOOR:
             self.victory()
         else:
+            failed_quests = self.quest_manager.fail_floor_locked_quests(self.floor + 1)
+            for quest in failed_quests:
+                self.add_message(f'任务失败：{quest.name}（本层任务未完成）')
+            
+            for item in self.player.inventory[:]:
+                if hasattr(item, 'item_type') and item.item_type == 'delivery_letter':
+                    self.player.inventory.remove(item)
+            
             self.floor += 1
             self.generate_floor()
-            self.add_message(f'进入了第 {self.floor} 层！')
+            
+            theme_name = FLOOR_THEMES[self.floor]['name']
+            self.add_message(f'进入了{theme_name}（第 {self.floor} 层）！')
     
     def move_single_player(self, player, dx, dy, player_num=1):
         if not self.player_turn:
@@ -330,7 +340,11 @@ class Game:
                     self.items.remove(item)
                     self.add_message(f'{player.name}拾取了 {item.amount} 金币！')
                 else:
-                    if player.add_item(item):
+                    if hasattr(item, 'item_type') and item.item_type == 'quest_item':
+                        self.quest_manager.update_collect_progress(item)
+                        self.items.remove(item)
+                        self.add_message(f'{player.name}收集了任务物品：{item.name}！')
+                    elif player.add_item(item):
                         self.items.remove(item)
                         self.add_message(f'{player.name}拾取了 {item.name}！')
         
@@ -528,6 +542,15 @@ class Game:
                 for summon in monster.summons:
                     if summon in self.monsters:
                         self.monsters.remove(summon)
+            
+            if hasattr(monster, 'monster_type') and monster.monster_type != 'summon':
+                self.quest_manager.update_hunt_progress(
+                    getattr(monster, 'monster_type', 'normal'),
+                    getattr(monster, 'name', '')
+                )
+                self.behavior_tracker.record_monster_killed(
+                    getattr(monster, 'monster_type', 'normal')
+                )
             
             if hasattr(monster, 'drop_loot') and monster.monster_type in ['elite', 'boss', 'normal']:
                 drops = monster.drop_loot()
@@ -1067,6 +1090,23 @@ class Game:
                 px = int(minimap_rect.x + sx * scale)
                 py = int(minimap_rect.y + sy * scale)
                 pygame.draw.circle(self.screen, YELLOW, (px, py), 4)
+        
+        quest_targets = self.quest_manager.get_quest_target_positions()
+        for (pos, quest_type) in quest_targets:
+            tx, ty = pos
+            if self.game_map.explored[tx][ty]:
+                px = int(minimap_rect.x + tx * scale)
+                py = int(minimap_rect.y + ty * scale)
+                if quest_type == 'collect':
+                    pygame.draw.circle(self.screen, (100, 255, 100), (px, py), 4)
+                elif quest_type == 'delivery':
+                    pygame.draw.circle(self.screen, (100, 200, 255), (px, py), 4)
+        
+        for npc in self.npcs:
+            if self.game_map.explored[npc.x][npc.y]:
+                px = int(minimap_rect.x + npc.x * scale)
+                py = int(minimap_rect.y + npc.y * scale)
+                pygame.draw.circle(self.screen, (200, 200, 100), (px, py), 3)
         
         for room in self.game_map.rooms:
             if room.room_type == 'shop':
@@ -2173,6 +2213,14 @@ class Game:
     def handle_interaction(self):
         for npc in self.npcs:
             if npc.get_distance_to(self.player) <= 1.5:
+                delivery_completed, quest = self.quest_manager.check_delivery_quests(npc, self.player)
+                if delivery_completed and quest:
+                    self.add_message(f'{npc.name}: 谢谢你送来的信件！')
+                    success, message = self.quest_manager.complete_quest(quest, self.player)
+                    if success:
+                        self.add_message(f'完成任务：{quest.name}！获得奖励！')
+                    return
+                
                 self.current_npc = npc
                 self.state = GameState.NPC_INTERACT
                 self.quest_selection = 0
@@ -2580,6 +2628,23 @@ class Game:
                 if success:
                     self.add_message(f'接受任务：{quest.name}')
                     available_quests.remove(quest)
+                    
+                    if quest.quest_type == 'delivery':
+                        target_npc = quest.target_data.get('target_npc', '')
+                        letter = DeliveryLetter(0, 0, quest.floor, target_npc)
+                        self.player.add_item(letter)
+                        self.add_message('获得了重要信件！')
+                        
+                        for npc in self.npcs:
+                            if npc.name == target_npc:
+                                quest.set_target_position(npc.x, npc.y)
+                                break
+                    
+                    elif quest.quest_type == 'collect':
+                        collect_items = quest.spawn_collect_items(self.game_map, self.game_map.rooms)
+                        for item in collect_items:
+                            self.items.append(item)
+                        self.add_message(f'地图上出现了 {len(collect_items)} 个任务物品！')
                 else:
                     self.add_message(message)
         elif event.key == pygame.K_ESCAPE:
