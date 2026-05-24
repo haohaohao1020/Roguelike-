@@ -9,16 +9,16 @@ class DamageNumber:
         self.is_crit = is_crit
         self.is_heal = is_heal
         self.color = color
-        self.life = 60
-        self.vy = -2
+        self.life = 20
+        self.vy = -3
         self.alpha = 255
     
     def update(self):
         self.y += self.vy
-        self.vy += 0.1
+        self.vy += 0.15
         self.life -= 1
-        if self.life < 30:
-            self.alpha = int(255 * (self.life / 30))
+        if self.life < 10:
+            self.alpha = int(255 * (self.life / 10))
         return self.life > 0
 
 class CombatSystem:
@@ -28,8 +28,9 @@ class CombatSystem:
         self.skill_effects = []
     
     def add_damage_number(self, x, y, damage, is_crit=False, is_heal=False, color=None):
-        num = DamageNumber(x, y, damage, is_crit, is_heal, color)
-        self.damage_numbers.append(num)
+        if is_crit or is_heal:
+            num = DamageNumber(x, y, damage, is_crit, is_heal, color)
+            self.damage_numbers.append(num)
     
     def add_skill_effect(self, effect_type, x, y, duration=30):
         self.skill_effects.append({
