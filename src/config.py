@@ -231,7 +231,148 @@ BASE_STAT_NAMES = {
     'block_rate': '格挡率'
 }
 
-MAX_FLOOR = 5
+MAX_FLOOR = 10
+
+FLOOR_THEMES = {
+    1: {
+        'name': '幽暗密林',
+        'description': '植被茂密的古老森林，野兽与丛林魔物盘踞',
+        'floor_color': (30, 60, 30),
+        'wall_color': (40, 80, 40),
+        'accent_color': (60, 120, 60),
+        'monster_types': ['forest_wolf', 'giant_spider', 'wood_sprite', 'poison_vine'],
+        'boss_name': '森林守护者·树人长老',
+        'boss_color': (50, 150, 50),
+        'bgm': 'forest'
+    },
+    2: {
+        'name': '幽深墓穴',
+        'description': '古老的地下陵墓，亡灵骷髅类怪物出没',
+        'floor_color': (40, 40, 50),
+        'wall_color': (60, 60, 70),
+        'accent_color': (100, 100, 120),
+        'monster_types': ['skeleton', 'ghost', 'wraith', 'bone_guard'],
+        'boss_name': '亡灵君主·骸骨王',
+        'boss_color': (150, 150, 180),
+        'bgm': 'crypt'
+    },
+    3: {
+        'name': '烈焰地狱',
+        'description': '炙热的岩浆地貌，火焰妖魔镇守',
+        'floor_color': (80, 30, 20),
+        'wall_color': (120, 50, 30),
+        'accent_color': (200, 80, 40),
+        'monster_types': ['fire_imp', 'lava_golem', 'flame_demon', 'ash_wraith'],
+        'boss_name': '炎狱领主·焚天魔',
+        'boss_color': (255, 100, 30),
+        'bgm': 'hell'
+    },
+    4: {
+        'name': '虚空深渊',
+        'description': '暗黑虚无的空间，暗影诡谲怪物潜伏',
+        'floor_color': (20, 10, 40),
+        'wall_color': (40, 20, 60),
+        'accent_color': (80, 40, 120),
+        'monster_types': ['shadow_wraith', 'void_creature', 'dark_mage', 'nightmare'],
+        'boss_name': '虚空之主·暗影',
+        'boss_color': (100, 50, 180),
+        'bgm': 'abyss'
+    },
+    5: {
+        'name': '废弃古堡',
+        'description': '残破的欧式建筑，铠甲守卫游荡',
+        'floor_color': (60, 50, 40),
+        'wall_color': (90, 70, 50),
+        'accent_color': (140, 110, 80),
+        'monster_types': ['armor_guard', 'ghost_knight', 'blood_servant', 'animated_armor'],
+        'boss_name': '古堡主人·吸血伯爵',
+        'boss_color': (180, 60, 80),
+        'bgm': 'castle'
+    },
+    6: {
+        'name': '古龙巢穴',
+        'description': '险峻的山石洞窟，远古龙族的领地',
+        'floor_color': (70, 60, 50),
+        'wall_color': (100, 80, 60),
+        'accent_color': (160, 120, 80),
+        'monster_types': ['young_dragon', 'wyrm', 'dragon_hatchling', 'fire_drake'],
+        'boss_name': '炎龙·赤焰',
+        'boss_color': (255, 150, 50),
+        'bgm': 'dragon'
+    },
+    7: {
+        'name': '远古神殿',
+        'description': '神秘的远古遗迹，神圣力量与诅咒并存',
+        'floor_color': (80, 70, 90),
+        'wall_color': (110, 90, 120),
+        'accent_color': (180, 160, 200),
+        'monster_types': ['temple_guardian', 'fallen_priest', 'angelic_warrior', 'holy_construct'],
+        'boss_name': '神殿守护者·光暗双生',
+        'boss_color': (200, 180, 220),
+        'bgm': 'temple'
+    },
+    8: {
+        'name': '冰封秘境',
+        'description': '永恒的冰雪世界，极寒之地的考验',
+        'floor_color': (100, 150, 200),
+        'wall_color': (130, 180, 230),
+        'accent_color': (180, 220, 255),
+        'monster_types': ['ice_golem', 'frost_wraith', 'snow_beast', 'glacial_spirit'],
+        'boss_name': '冰霜女王·极寒',
+        'boss_color': (150, 220, 255),
+        'bgm': 'frost'
+    },
+    9: {
+        'name': '混沌领域',
+        'description': '混乱扭曲的空间，法则崩坏之地',
+        'floor_color': (80, 20, 80),
+        'wall_color': (120, 40, 120),
+        'accent_color': (180, 60, 180),
+        'monster_types': ['chaos_spawn', 'abomination', 'warped_horror', 'void_serpent'],
+        'boss_name': '混沌之主·湮灭',
+        'boss_color': (200, 80, 200),
+        'bgm': 'chaos'
+    },
+    10: {
+        'name': '终焉圣殿',
+        'description': '命运的终点，最终决战之地',
+        'floor_color': (50, 50, 80),
+        'wall_color': (80, 80, 120),
+        'accent_color': (150, 150, 200),
+        'monster_types': ['final_guardian', 'archangel', 'demon_lord', 'aspect_of_death'],
+        'boss_name': '终焉神·创世',
+        'boss_color': (255, 215, 0),
+        'bgm': 'final'
+    }
+}
+
+ENDING_TYPES = {
+    'bad': {
+        'name': '灰暗落败结局',
+        'description': '你逃避了太多战斗，滥用诅咒道具，伤害了无辜之人...',
+        'color': (80, 80, 80),
+        'title_color': (100, 100, 100)
+    },
+    'normal': {
+        'name': '圆满通关结局',
+        'description': '你稳步推进了冒险，完成了众多任务，成为了真正的勇者！',
+        'color': (100, 150, 200),
+        'title_color': (150, 200, 255)
+    },
+    'true': {
+        'name': '隐藏真结局',
+        'description': '你集齐了所有信物，完成了全部任务，无伤击败了终极BOSS！你是传说中的英雄！',
+        'color': (255, 215, 0),
+        'title_color': (255, 255, 200)
+    }
+}
+
+QUEST_TYPES = ['delivery', 'hunt', 'collect']
+QUEST_NAMES = {
+    'delivery': '送信任务',
+    'hunt': '猎杀任务',
+    'collect': '收集任务'
+}
 
 SKILLS = {
     'warrior': {
@@ -368,3 +509,68 @@ FONT_SMALL = get_chinese_font(20)
 FONT_NORMAL = get_chinese_font(24)
 FONT_LARGE = get_chinese_font(36)
 FONT_TITLE = get_chinese_font(48)
+
+ARTIFACT_NAMES = [
+    '森林之心', '灵魂宝石', '火焰精华', '暗影之核', '血族徽记',
+    '龙鳞护符', '圣光遗物', '冰霜之心', '混沌碎片', '创世之眼'
+]
+
+NPC_NAMES = [
+    '神秘商人·李', '老猎人·王', '流浪法师·陈', '圣骑士·赵', '冒险家·周',
+    '幽灵船长', '神秘旅者', '暗影刺客', '光之使者', '时间旅行者'
+]
+
+TASK_NAMES = {
+    'delivery': [
+        '重要密函', '珍贵卷轴', '魔法信件', '家族信物', '紧急情报'
+    ],
+    'hunt': [
+        '清除威胁', '复仇猎杀', '精英挑战', '怪物歼灭', '危险驱逐'
+    ],
+    'collect': [
+        '材料收集', '珍稀采集', '遗物搜寻', '宝物探索', '资源获取'
+    ]
+}
+
+MONSTER_NAMES_CN = {
+    'forest_wolf': '森林狼',
+    'giant_spider': '巨型蜘蛛',
+    'wood_sprite': '树精',
+    'poison_vine': '毒藤怪',
+    'skeleton': '骷髅兵',
+    'ghost': '幽灵',
+    'wraith': '怨灵',
+    'bone_guard': '骨甲守卫',
+    'fire_imp': '火妖',
+    'lava_golem': '熔岩魔像',
+    'flame_demon': '炎魔',
+    'ash_wraith': '灰烬怨灵',
+    'shadow_wraith': '暗影幽灵',
+    'void_creature': '虚空造物',
+    'dark_mage': '黑暗法师',
+    'nightmare': '梦魇',
+    'armor_guard': '铠甲守卫',
+    'ghost_knight': '幽灵骑士',
+    'blood_servant': '血仆',
+    'animated_armor': '活化铠甲',
+    'young_dragon': '幼龙',
+    'wyrm': '亚龙',
+    'dragon_hatchling': '龙崽',
+    'fire_drake': '火龙兽',
+    'temple_guardian': '神殿守卫',
+    'fallen_priest': '堕落祭司',
+    'angelic_warrior': '天使战士',
+    'holy_construct': '圣物傀儡',
+    'ice_golem': '冰霜魔像',
+    'frost_wraith': '冰霜怨灵',
+    'snow_beast': '雪兽',
+    'glacial_spirit': '冰川精灵',
+    'chaos_spawn': '混沌 spawn',
+    'abomination': '憎恶',
+    'warped_horror': '扭曲恐惧',
+    'void_serpent': '虚空巨蛇',
+    'final_guardian': '终极守卫',
+    'archangel': '大天使',
+    'demon_lord': '魔王',
+    'aspect_of_death': '死亡化身'
+}

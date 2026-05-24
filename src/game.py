@@ -3,13 +3,15 @@ import random
 from .config import *
 from .map import GameMap
 from .entity import Character
-from .monster import create_monster, create_elite, create_boss
+from .monster import create_monster, create_elite, create_boss, FinalBoss
 from .items import Chest, create_random_item, Potion, Gold
 from .combat import CombatSystem
 from .save_manager import SaveManager, Shop
 from .asset_loader import asset_loader
 from .renderer import DungeonRenderer, MonsterRenderer, PlayerRenderer
 from .items import SynthesisSystem
+from .npc import create_random_npc, QuestManager
+from .behavior_tracker import BehaviorTracker, EndingSystem
 
 class GameState:
     MENU = 'menu'
@@ -24,6 +26,9 @@ class GameState:
     TALENT = 'talent'
     MODE_SELECT = 'mode_select'
     SYNTHESIS = 'synthesis'
+    QUEST_PANEL = 'quest_panel'
+    NPC_INTERACT = 'npc_interact'
+    ENDING = 'ending'
 
 class Game:
     def __init__(self):
@@ -75,6 +80,18 @@ class Game:
         self.room_colors = {}
         self.last_room_type = None
         self.used_rooms = set()
+        
+        self.quest_manager = QuestManager()
+        self.behavior_tracker = BehaviorTracker()
+        self.ending_system = EndingSystem()
+        self.npcs = []
+        self.current_npc = None
+        self.quest_selection = 0
+        self.npc_selection = 0
+        self.current_ending = None
+        self.ending_data = None
+        self.final_boss_damage_taken = 0
+        self.is_fighting_final_boss = False
     
     def add_message(self, text):
         self.message_log.append(text)
@@ -107,9 +124,13 @@ class Game:
         
         self.monsters = []
         self.items = []
+        self.npcs = []
         self.used_rooms = set()
         
+        self.dungeon_renderer.set_floor_theme(self.floor)
+        
         monster_multiplier = 1.5 if self.game_mode == 'coop' else 1.0
+        floor_difficulty_multiplier = 1 + (self.floor - 1) * 0.15
         
         if self.game_map.rooms:
             start_room = self.game_map.rooms[0]
@@ -123,19 +144,38 @@ class Game:
             self.room_colors[(room.x1, room.y1, room.x2, room.y2)] = room_color
             
             if room.room_type == 'normal':
-                base_monsters = random.randint(2, 4)
-                num_monsters = int(base_monsters * monster_multiplier)
+                base_monsters = random.randint(2, 4 + self.floor // 3)
+                num_monsters = int(base_monsters * monster_multiplier * floor_difficulty_multiplier)
                 for _ in range(num_monsters):
                     x, y = room.get_random_position()
                     if not any(m.x == x and m.y == y for m in self.monsters):
                         monster = create_monster(x, y, self.floor)
                         self.monsters.append(monster)
+                
+                elite_chance = 0.1 + self.floor * 0.05
+                if random.random() < elite_chance:
+                    ex, ey = room.get_random_position()
+                    if not any(m.x == ex and m.y == ey for m in self.monsters):
+                        elite = create_elite(ex, ey, self.floor)
+                        self.monsters.append(elite)
+                
+                if random.random() < 0.2:
+                    nx, ny = room.get_random_position()
+                    if not any(e.x == nx and e.y == ny for e in self.monsters + self.items + self.npcs):
+                        npc = create_random_npc(nx, ny, self.floor)
+                        self.npcs.append(npc)
+            
             elif room.room_type == 'treasure':
                 x, y = room.center()
                 self.items.append(Chest(x, y, self.floor))
             elif room.room_type == 'boss':
                 x, y = room.center()
-                boss = create_boss(x, y, self.floor)
+                if self.floor == 10:
+                    boss = FinalBoss(x, y)
+                    self.is_fighting_final_boss = True
+                    self.final_boss_damage_taken = 0
+                else:
+                    boss = create_boss(x, y, self.floor)
                 self.monsters.append(boss)
                 if random.random() < 0.4:
                     ex, ey = room.get_random_position()
@@ -163,6 +203,8 @@ class Game:
                         item = create_random_item(x, y, self.floor)
                         if item:
                             self.items.append(item)
+        
+        self.quest_manager.update_delivery_progress(self.floor)
         
         self.game_map.update_fov(self.player.x, self.player.y, 15)
         self.update_camera()
@@ -192,12 +234,27 @@ class Game:
         self.turn = 0
         self.message_log = []
         self.map_reveal_duration = 0
+        
+        self.quest_manager = QuestManager()
+        self.behavior_tracker = BehaviorTracker()
+        self.npcs = []
+        self.current_npc = None
+        self.quest_selection = 0
+        self.npc_selection = 0
+        self.current_ending = None
+        self.ending_data = None
+        self.final_boss_damage_taken = 0
+        self.is_fighting_final_boss = False
+        
         self.generate_floor()
         self.state = GameState.PLAYING
         if self.game_mode == 'coop':
             self.add_message('双人模式开始！并肩作战吧！')
         else:
             self.add_message('欢迎来到地牢！')
+        
+        theme_name = FLOOR_THEMES[self.floor]['name']
+        self.add_message(f'进入了{theme_name}！')
     
     def get_nearest_monster(self, player):
         nearest = None
@@ -251,6 +308,9 @@ class Game:
         
         for monster in self.monsters:
             if monster.x == new_x and monster.y == new_y:
+                if hasattr(monster, 'is_summon') and monster.is_summon:
+                    self.add_message('不能攻击自己的召唤物！')
+                    return True
                 attack_count = player.get_total_attack_count()
                 for i in range(attack_count):
                     if monster.is_alive():
@@ -290,6 +350,10 @@ class Game:
                         self.game_map.update_fov(self.player2.x, self.player2.y, 15)
                 else:
                     self.game_map.update_fov(player.x, player.y, 15)
+                
+                if self.map_reveal_duration > 0:
+                    self.game_map.reveal_all()
+                
                 self.update_camera()
         
         room = self.game_map.get_room_at(player.x, player.y)
@@ -514,6 +578,8 @@ class Game:
                 if player.level_up_animation <= 0:
                     player.is_leveling_up = False
         
+        self.behavior_tracker.update_play_time()
+        
         self.player_turn = True
     
     def render_player_status(self, player, x, y, label=None):
@@ -588,7 +654,7 @@ class Game:
             self.render_mode_select()
         elif self.state == GameState.CLASS_SELECT:
             self.render_class_select()
-        elif self.state in [GameState.PLAYING, GameState.PAUSED, GameState.INVENTORY, GameState.SHOP, GameState.TALENT, GameState.SYNTHESIS]:
+        elif self.state in [GameState.PLAYING, GameState.PAUSED, GameState.INVENTORY, GameState.SHOP, GameState.TALENT, GameState.SYNTHESIS, GameState.QUEST_PANEL, GameState.NPC_INTERACT]:
             self.render_game()
             if self.state == GameState.PAUSED:
                 self.render_pause_menu()
@@ -600,10 +666,16 @@ class Game:
                 self.render_talent()
             elif self.state == GameState.SYNTHESIS:
                 self.render_synthesis()
+            elif self.state == GameState.QUEST_PANEL:
+                self.render_quest_panel()
+            elif self.state == GameState.NPC_INTERACT:
+                self.render_npc_interact()
         elif self.state == GameState.GAME_OVER:
             self.render_game_over()
         elif self.state == GameState.VICTORY:
             self.render_victory()
+        elif self.state == GameState.ENDING:
+            self.render_ending()
         elif self.state == GameState.LEADERBOARD:
             self.render_leaderboard()
         
@@ -727,6 +799,10 @@ class Game:
                         self.monster_renderer.draw_reviver(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True, is_down, revive_count)
                     else:
                         self.monster_renderer.draw_goblin(self.screen, monster.x, monster.y, self.camera_x, self.camera_y, monster.hp, monster.max_hp, monster.is_hurt, True)
+        
+        for npc in self.npcs:
+            if self.game_map.explored[npc.x][npc.y] and self.game_map.visible[npc.x][npc.y]:
+                self.dungeon_renderer.draw_npc(self.screen, npc.x, npc.y, self.camera_x, self.camera_y, npc, True)
         
         for effect in self.combat.skill_effects:
             self.player_renderer.skill_effect_renderer.draw_skill_effect(self.screen, effect, self.camera_x, self.camera_y)
@@ -1831,7 +1907,33 @@ class Game:
         self.save_manager.delete_save()
     
     def victory(self):
-        self.state = GameState.VICTORY
+        if self.floor >= MAX_FLOOR:
+            self.show_ending()
+        else:
+            self.state = GameState.VICTORY
+            score = self.player.level * 100 + self.floor * 1000
+            self.save_manager.save_score(self.player.name, score, self.floor)
+            self.save_manager.delete_save()
+    
+    def show_ending(self):
+        if self.is_fighting_final_boss:
+            self.behavior_tracker.final_boss_no_damage = (self.final_boss_damage_taken == 0)
+        
+        ending_type = self.ending_system.determine_ending(
+            self.behavior_tracker, 
+            self.quest_manager, 
+            self.floor
+        )
+        
+        self.current_ending = ending_type
+        self.ending_data = {
+            'floor': self.floor,
+            'monsters_killed': self.behavior_tracker.monsters_killed,
+            'quests_completed': self.quest_manager.completed_quests,
+            'play_time': self.behavior_tracker.play_time
+        }
+        
+        self.state = GameState.ENDING
         score = self.player.level * 100 + self.floor * 1000
         self.save_manager.save_score(self.player.name, score, self.floor)
         self.save_manager.delete_save()
@@ -1863,6 +1965,14 @@ class Game:
                     self.handle_talent_input(event)
                 elif self.state == GameState.SYNTHESIS:
                     self.handle_synthesis_input(event)
+                elif self.state == GameState.QUEST_PANEL:
+                    self.handle_quest_panel_input(event)
+                elif self.state == GameState.NPC_INTERACT:
+                    self.handle_npc_interact_input(event)
+                elif self.state == GameState.ENDING:
+                    if event.key == pygame.K_RETURN or event.key == pygame.K_ESCAPE:
+                        self.state = GameState.MENU
+                        self.current_ending = None
                 elif self.state in [GameState.GAME_OVER, GameState.VICTORY, GameState.LEADERBOARD]:
                     self.state = GameState.MENU
     
@@ -2016,7 +2126,7 @@ class Game:
                         self.end_player_turn()
                         break
             elif event.key in [pygame.K_e]:
-                self.handle_special_room_interaction()
+                self.handle_interaction()
             elif event.key in [pygame.K_i]:
                 self.state = GameState.INVENTORY
                 self.inventory_selection = 0
@@ -2026,6 +2136,9 @@ class Game:
             elif event.key in [pygame.K_c]:
                 self.state = GameState.SYNTHESIS
                 self.synthesis_selection = 0
+            elif event.key in [pygame.K_j]:
+                self.state = GameState.QUEST_PANEL
+                self.quest_selection = 0
             elif event.key == pygame.K_ESCAPE:
                 self.state = GameState.PAUSED
                 self.menu_selection = 0
@@ -2056,6 +2169,17 @@ class Game:
                             self.monsters.remove(monster)
                         self.end_player_turn()
                         break
+    
+    def handle_interaction(self):
+        for npc in self.npcs:
+            if npc.get_distance_to(self.player) <= 1.5:
+                self.current_npc = npc
+                self.state = GameState.NPC_INTERACT
+                self.quest_selection = 0
+                self.add_message(f'{npc.name}: {npc.dialogue}')
+                return
+        
+        self.handle_special_room_interaction()
     
     def handle_special_room_interaction(self):
         room = self.game_map.get_room_at(self.player.x, self.player.y)
@@ -2402,6 +2526,222 @@ class Game:
             self.add_message(f'{message}')
         elif event.key == pygame.K_ESCAPE:
             self.state = GameState.PLAYING
+    
+    def handle_quest_panel_input(self, event):
+        quests = self.quest_manager.get_active_quests()
+        max_quests = max(1, len(quests))
+        
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.quest_selection = (self.quest_selection - 1) % max_quests
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+            self.quest_selection = (self.quest_selection + 1) % max_quests
+        elif event.key == pygame.K_a:
+            if quests and self.quest_selection < len(quests):
+                quest = quests[self.quest_selection]
+                if quest.quest_type == 'collect' and quest.can_complete():
+                    self.quest_manager.complete_quest(quest, self.player)
+                    self.add_message(f'完成任务：{quest.name}！')
+                    for reward in quest.rewards:
+                        if isinstance(reward, str) and reward.startswith('gold:'):
+                            gold = int(reward.split(':')[1])
+                            self.player.gold += gold
+                        elif isinstance(reward, str) and reward.startswith('talent:'):
+                            points = int(reward.split(':')[1])
+                            self.player.talent_points += points
+                        elif hasattr(reward, 'name'):
+                            self.player.add_item(reward)
+        elif event.key == pygame.K_d:
+            if quests and self.quest_selection < len(quests):
+                quest = quests[self.quest_selection]
+                self.quest_manager.abandon_quest(quest)
+                self.add_message(f'已放弃任务：{quest.name}')
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.PLAYING
+    
+    def handle_npc_interact_input(self, event):
+        if not self.current_npc:
+            self.state = GameState.PLAYING
+            return
+        
+        available_quests = self.current_npc.quests
+        max_options = len(available_quests) + 1
+        
+        if event.key in [pygame.K_UP, pygame.K_w]:
+            self.quest_selection = (self.quest_selection - 1) % max_options
+        elif event.key in [pygame.K_DOWN, pygame.K_s]:
+            self.quest_selection = (self.quest_selection + 1) % max_options
+        elif event.key == pygame.K_RETURN:
+            if self.quest_selection == len(available_quests):
+                self.state = GameState.PLAYING
+                self.current_npc = None
+            else:
+                quest = available_quests[self.quest_selection]
+                success, message = self.quest_manager.accept_quest(quest)
+                if success:
+                    self.add_message(f'接受任务：{quest.name}')
+                    available_quests.remove(quest)
+                else:
+                    self.add_message(message)
+        elif event.key == pygame.K_ESCAPE:
+            self.state = GameState.PLAYING
+            self.current_npc = None
+    
+    def render_quest_panel(self):
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 450, 80, 900, 600)
+        pygame.draw.rect(self.screen, (20, 20, 35), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
+        title = FONT_LARGE.render('任务面板', True, GOLD)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 110))
+        self.screen.blit(title, title_rect)
+        
+        quests = self.quest_manager.get_active_quests()
+        completed = self.quest_manager.completed_quests
+        
+        stats_text = FONT_SMALL.render(f'已完成: {completed} | 进行中: {len(quests)}/5', True, LIGHT_GRAY)
+        self.screen.blit(stats_text, (SCREEN_WIDTH // 2 - 430, 140))
+        
+        if not quests:
+            no_quest_text = FONT_NORMAL.render('暂无进行中的任务', True, LIGHT_GRAY)
+            no_quest_rect = no_quest_text.get_rect(center=(SCREEN_WIDTH // 2, 350))
+            self.screen.blit(no_quest_text, no_quest_rect)
+        else:
+            list_rect = pygame.Rect(SCREEN_WIDTH // 2 - 430, 160, 860, 400)
+            pygame.draw.rect(self.screen, (30, 30, 50), list_rect)
+            
+            for i, quest in enumerate(quests[:10]):
+                y = 170 + i * 38
+                if i == self.quest_selection:
+                    pygame.draw.rect(self.screen, (50, 50, 80), (SCREEN_WIDTH // 2 - 425, y, 850, 35))
+                
+                type_colors = {'delivery': CYAN, 'hunt': RED, 'collect': GREEN}
+                type_names = {'delivery': '送信', 'hunt': '猎杀', 'collect': '收集'}
+                type_color = type_colors.get(quest.quest_type, WHITE)
+                
+                type_text = FONT_SMALL.render(f'[{type_names.get(quest.quest_type, "任务")}]', True, type_color)
+                self.screen.blit(type_text, (SCREEN_WIDTH // 2 - 420, y + 8))
+                
+                name_text = FONT_SMALL.render(quest.name, True, WHITE)
+                self.screen.blit(name_text, (SCREEN_WIDTH // 2 - 360, y + 8))
+                
+                progress = quest.get_progress_text()
+                progress_text = FONT_SMALL.render(progress, True, YELLOW)
+                self.screen.blit(progress_text, (SCREEN_WIDTH // 2 + 100, y + 8))
+                
+                status_color = GREEN if quest.can_complete() else LIGHT_GRAY
+                status = '可提交(A)' if quest.can_complete() else '进行中'
+                status_text = FONT_SMALL.render(status, True, status_color)
+                self.screen.blit(status_text, (SCREEN_WIDTH // 2 + 300, y + 8))
+            
+            if quests and self.quest_selection < len(quests):
+                quest = quests[self.quest_selection]
+                desc_rect = pygame.Rect(SCREEN_WIDTH // 2 - 430, 570, 860, 90)
+                pygame.draw.rect(self.screen, (30, 30, 50), desc_rect)
+                pygame.draw.rect(self.screen, (100, 100, 150), desc_rect, 1)
+                
+                desc_text = FONT_SMALL.render(quest.description, True, LIGHT_GRAY)
+                self.screen.blit(desc_text, (SCREEN_WIDTH // 2 - 420, 580))
+                
+                reward_text = FONT_SMALL.render(f'奖励: {quest.get_reward_text()}', True, GOLD)
+                self.screen.blit(reward_text, (SCREEN_WIDTH // 2 - 420, 620))
+        
+        hint_text = FONT_SMALL.render('W/S:选择 | A:提交 | D:放弃 | ESC:返回', True, LIGHT_GRAY)
+        self.screen.blit(hint_text, (SCREEN_WIDTH // 2 - 200, 680))
+    
+    def render_npc_interact(self):
+        if not self.current_npc:
+            return
+        
+        panel_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 120, 800, 500)
+        pygame.draw.rect(self.screen, (25, 25, 45), panel_rect)
+        pygame.draw.rect(self.screen, GOLD, panel_rect, 3)
+        
+        name_bg = pygame.Rect(SCREEN_WIDTH // 2 - 400, 120, 800, 60)
+        pygame.draw.rect(self.screen, (40, 40, 70), name_bg)
+        npc_name = FONT_LARGE.render(self.current_npc.name, True, YELLOW)
+        name_rect = npc_name.get_rect(center=(SCREEN_WIDTH // 2, 150))
+        self.screen.blit(npc_name, name_rect)
+        
+        dialogue_rect = pygame.Rect(SCREEN_WIDTH // 2 - 380, 190, 760, 80)
+        pygame.draw.rect(self.screen, (35, 35, 55), dialogue_rect)
+        dialogue_text = FONT_SMALL.render(f'"{self.current_npc.dialogue}"', True, LIGHT_GRAY)
+        dialogue_rect_text = dialogue_text.get_rect(center=(SCREEN_WIDTH // 2, 230))
+        self.screen.blit(dialogue_text, dialogue_rect_text)
+        
+        quests_title = FONT_NORMAL.render('可接任务:', True, GOLD)
+        self.screen.blit(quests_title, (SCREEN_WIDTH // 2 - 380, 290))
+        
+        available_quests = self.current_npc.quests
+        total_options = len(available_quests) + 1
+        
+        for i, quest in enumerate(available_quests):
+            y = 330 + i * 50
+            if i == self.quest_selection:
+                pygame.draw.rect(self.screen, (60, 60, 100), (SCREEN_WIDTH // 2 - 380, y, 760, 45))
+            
+            type_colors = {'delivery': CYAN, 'hunt': RED, 'collect': GREEN}
+            type_names = {'delivery': '送信', 'hunt': '猎杀', 'collect': '收集'}
+            type_color = type_colors.get(quest.quest_type, WHITE)
+            
+            type_text = FONT_SMALL.render(f'[{type_names.get(quest.quest_type, "任务")}]', True, type_color)
+            self.screen.blit(type_text, (SCREEN_WIDTH // 2 - 370, y + 12))
+            
+            name_text = FONT_NORMAL.render(quest.name, True, WHITE)
+            self.screen.blit(name_text, (SCREEN_WIDTH // 2 - 300, y + 10))
+            
+            reward_text = FONT_SMALL.render(f'奖励: {quest.get_reward_text()}', True, GOLD)
+            self.screen.blit(reward_text, (SCREEN_WIDTH // 2 + 100, y + 15))
+        
+        exit_y = 330 + len(available_quests) * 50
+        if len(available_quests) == self.quest_selection:
+            pygame.draw.rect(self.screen, (60, 60, 100), (SCREEN_WIDTH // 2 - 380, exit_y, 760, 45))
+        
+        exit_text = FONT_NORMAL.render('离开', True, LIGHT_GRAY)
+        self.screen.blit(exit_text, (SCREEN_WIDTH // 2 - 370, exit_y + 10))
+        
+        hint_text = FONT_SMALL.render('W/S:选择 | 回车:确认 | ESC:离开', True, LIGHT_GRAY)
+        self.screen.blit(hint_text, (SCREEN_WIDTH // 2 - 180, 580))
+    
+    def render_ending(self):
+        if not self.current_ending or not self.ending_data:
+            return
+        
+        ending_config = ENDING_TYPES.get(self.current_ending, ENDING_TYPES['normal'])
+        
+        bg_color = ending_config['bg_color']
+        self.screen.fill(bg_color)
+        
+        title = FONT_LARGE.render(ending_config['title'], True, ending_config['title_color'])
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 150))
+        self.screen.blit(title, title_rect)
+        
+        subtitle = FONT_NORMAL.render(ending_config['subtitle'], True, ending_config['text_color'])
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 220))
+        self.screen.blit(subtitle, subtitle_rect)
+        
+        story_rect = pygame.Rect(SCREEN_WIDTH // 2 - 400, 280, 800, 250)
+        pygame.draw.rect(self.screen, (30, 30, 50, 200), story_rect)
+        pygame.draw.rect(self.screen, ending_config['title_color'], story_rect, 2)
+        
+        story_lines = [ending_config['story'][i:i+40] for i in range(0, len(ending_config['story']), 40)]
+        for i, line in enumerate(story_lines[:8]):
+            line_text = FONT_SMALL.render(line, True, ending_config['text_color'])
+            self.screen.blit(line_text, (SCREEN_WIDTH // 2 - 380, 300 + i * 28))
+        
+        stats_y = 550
+        stats = [
+            f'通关楼层: {self.ending_data.get("floor", 1)}',
+            f'击败怪物: {self.ending_data.get("monsters_killed", 0)}',
+            f'完成任务: {self.ending_data.get("quests_completed", 0)}',
+            f'游戏时长: {self.ending_data.get("play_time", 0)}回合'
+        ]
+        for i, stat in enumerate(stats):
+            stat_text = FONT_SMALL.render(stat, True, LIGHT_GRAY)
+            self.screen.blit(stat_text, (SCREEN_WIDTH // 2 - 380 + i * 200, stats_y))
+        
+        prompt_text = FONT_NORMAL.render('按回车或ESC返回主菜单', True, LIGHT_GRAY)
+        prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, 650))
+        self.screen.blit(prompt_text, prompt_rect)
     
     def run(self):
         while self.running:

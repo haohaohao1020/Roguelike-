@@ -301,7 +301,7 @@ class Monster(Entity):
                 else:
                     damage = self.damage
                 target.take_damage(damage)
-            elif distance <= 5:
+            elif distance <= 15:
                 self.move_towards_target(game_map, target.x, target.y, entities)
             elif distance_to_master > 2:
                 self.move_towards_target(game_map, master.x, master.y, entities)
@@ -608,6 +608,41 @@ BOSS_DATA = {
         'hp_mult': 3.5,
         'dmg_mult': 2.5,
         'special': '龙息吐焰'
+    },
+    6: {
+        'name': '炎龙·赤焰',
+        'color': (255, 150, 50),
+        'hp_mult': 4.0,
+        'dmg_mult': 2.8,
+        'special': '烈焰吐息'
+    },
+    7: {
+        'name': '神殿守护者·光暗双生',
+        'color': (200, 180, 220),
+        'hp_mult': 4.5,
+        'dmg_mult': 3.0,
+        'special': '光暗冲击'
+    },
+    8: {
+        'name': '冰霜女王·极寒',
+        'color': (150, 220, 255),
+        'hp_mult': 4.2,
+        'dmg_mult': 2.9,
+        'special': '绝对零度'
+    },
+    9: {
+        'name': '混沌之主·湮灭',
+        'color': (200, 80, 200),
+        'hp_mult': 5.0,
+        'dmg_mult': 3.2,
+        'special': '混沌漩涡'
+    },
+    10: {
+        'name': '终焉神·创世',
+        'color': (255, 215, 0),
+        'hp_mult': 6.0,
+        'dmg_mult': 4.0,
+        'special': '终极审判'
     }
 }
 
@@ -640,6 +675,85 @@ class Boss(Monster):
             self.special_cooldown = 5
             return True, self.special_ability
         return False, None
+
+class FinalBoss(Boss):
+    def __init__(self, x, y):
+        super().__init__(x, y, 10)
+        self.phase = 1
+        self.max_phases = 3
+        self.phase_thresholds = [0.7, 0.4, 0.1]
+        self.is_transforming = False
+        self.transform_duration = 0
+        self.phase_skills = {
+            1: ['神圣之光', '召唤守卫'],
+            2: ['黑暗脉冲', '时空裂隙'],
+            3: ['终极审判', '创世毁灭']
+        }
+        self.special_cooldown_phase2 = 0
+        self.special_cooldown_phase3 = 0
+        self.damage_reduction = 0.0
+        self.attack_bonus = 1.0
+        self.summoned_entities = []
+    
+    def check_phase_transition(self):
+        hp_ratio = self.hp / self.max_hp
+        if self.phase < self.max_phases:
+            threshold = self.phase_thresholds[self.phase]
+            if hp_ratio <= threshold and not self.is_transforming:
+                self.start_phase_transition()
+    
+    def start_phase_transition(self):
+        self.is_transforming = True
+        self.transform_duration = 5
+        self.phase += 1
+        self.on_phase_change()
+    
+    def on_phase_change(self):
+        if self.phase == 2:
+            self.damage_reduction = 0.2
+            self.attack_bonus = 1.3
+            self.color = (200, 100, 200)
+            self.max_hp = int(self.max_hp * 1.2)
+            self.hp = int(self.max_hp * 0.4)
+        elif self.phase == 3:
+            self.damage_reduction = 0.4
+            self.attack_bonus = 1.8
+            self.color = (255, 215, 0)
+            self.max_hp = int(self.max_hp * 1.5)
+            self.hp = int(self.max_hp * 0.1)
+    
+    def take_damage(self, amount):
+        if self.is_transforming:
+            return 0
+        actual = int(amount * (1 - self.damage_reduction))
+        result = super().take_damage(actual)
+        self.check_phase_transition()
+        return result
+    
+    def update_special(self, game_map, player, entities, all_players=None):
+        super().update_special(game_map, player, entities, all_players)
+        
+        if self.is_transforming:
+            self.transform_duration -= 1
+            if self.transform_duration <= 0:
+                self.is_transforming = False
+        
+        if self.special_cooldown_phase2 > 0:
+            self.special_cooldown_phase2 -= 1
+        if self.special_cooldown_phase3 > 0:
+            self.special_cooldown_phase3 -= 1
+    
+    def get_available_skills(self):
+        skills = []
+        for p in range(1, self.phase + 1):
+            skills.extend(self.phase_skills.get(p, []))
+        return skills
+    
+    def is_alive(self):
+        return self.hp > 0 or self.is_transforming
+    
+    def should_remove(self):
+        return self.hp <= 0 and not self.is_transforming
 
 def create_monster(x, y, floor=1):
     monster_types = [Goblin, Orc, Skeleton, Mage, SummonerMonster, InvisibleMonster, ReviverMonster]

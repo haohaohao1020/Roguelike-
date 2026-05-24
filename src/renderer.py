@@ -5,7 +5,10 @@ from .config import *
 class DungeonRenderer:
     def __init__(self):
         self.tile_cache = {}
+        self.theme_cache = {}
+        self.current_floor = 1
         self.generate_tiles()
+        self.generate_theme_tiles()
     
     def generate_tiles(self):
         tile_size = TILE_SIZE
@@ -226,6 +229,117 @@ class DungeonRenderer:
         
         pygame.draw.circle(screen, (255, 215, 0), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 8)
         pygame.draw.circle(screen, (200, 170, 0), (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2), 5)
+    
+    def generate_theme_tiles(self):
+        tile_size = TILE_SIZE
+        for floor, theme in FLOOR_THEMES.items():
+            floor_tiles = []
+            floor_color = theme['floor_color']
+            accent_color = theme['accent_color']
+            
+            for i in range(4):
+                tile = pygame.Surface((tile_size, tile_size))
+                var_color = (
+                    max(0, min(255, floor_color[0] + random.randint(-10, 10))),
+                    max(0, min(255, floor_color[1] + random.randint(-10, 10))),
+                    max(0, min(255, floor_color[2] + random.randint(-10, 10)))
+                )
+                tile.fill(var_color)
+                for _ in range(3):
+                    px = random.randint(0, tile_size - 1)
+                    py = random.randint(0, tile_size - 1)
+                    detail_color = (
+                        max(0, min(255, accent_color[0] + random.randint(-20, 20))),
+                        max(0, min(255, accent_color[1] + random.randint(-20, 20))),
+                        max(0, min(255, accent_color[2] + random.randint(-20, 20)))
+                    )
+                    pygame.draw.circle(tile, detail_color, (px, py), 1)
+                floor_tiles.append(tile)
+            self.theme_cache[f'floor_{floor}'] = floor_tiles
+            
+            wall_tile = pygame.Surface((tile_size, tile_size))
+            wall_color = theme['wall_color']
+            wall_tile.fill(wall_color)
+            pygame.draw.rect(wall_tile, accent_color, (1, 1, tile_size - 2, tile_size - 2), 2)
+            pygame.draw.line(wall_tile, (
+                max(0, wall_color[0] - 30),
+                max(0, wall_color[1] - 30),
+                max(0, wall_color[2] - 30)
+            ), (0, tile_size // 3), (tile_size, tile_size // 3), 2)
+            pygame.draw.line(wall_tile, (
+                max(0, wall_color[0] - 30),
+                max(0, wall_color[1] - 30),
+                max(0, wall_color[2] - 30)
+            ), (0, tile_size * 2 // 3), (tile_size, tile_size * 2 // 3), 2)
+            self.theme_cache[f'wall_{floor}'] = wall_tile
+    
+    def set_floor_theme(self, floor):
+        self.current_floor = max(1, min(floor, MAX_FLOOR))
+    
+    def draw_themed_floor(self, screen, x, y, camera_x, camera_y, room_type='normal', terrain='normal', visible=True):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        floor = self.current_floor
+        
+        if terrain != 'normal':
+            tile = self.tile_cache.get(terrain, self.theme_cache[f'floor_{floor}'][0])
+        else:
+            tile_variant = (x + y) % 4
+            tile = self.theme_cache[f'floor_{floor}'][tile_variant]
+        
+        if not visible:
+            dark = tile.copy()
+            dark.fill((50, 50, 50), special_flags=pygame.BLEND_RGB_MULT)
+            screen.blit(dark, (screen_x, screen_y))
+        else:
+            screen.blit(tile, (screen_x, screen_y))
+    
+    def draw_themed_wall(self, screen, x, y, camera_x, camera_y, visible=True):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        floor = self.current_floor
+        
+        tile = self.theme_cache[f'wall_{floor}']
+        
+        if not visible:
+            dark = tile.copy()
+            dark.fill((30, 30, 30), special_flags=pygame.BLEND_RGB_MULT)
+            screen.blit(dark, (screen_x, screen_y))
+        else:
+            screen.blit(tile, (screen_x, screen_y))
+    
+    def draw_npc(self, screen, x, y, camera_x, camera_y, npc, visible=True):
+        screen_x = x * TILE_SIZE - int(camera_x)
+        screen_y = y * TILE_SIZE - int(camera_y)
+        
+        if not visible:
+            return
+        
+        npc_colors = {
+            'merchant': (100, 150, 200),
+            'hunter': (150, 100, 50),
+            'mage': (150, 100, 200),
+            'healer': (200, 200, 100)
+        }
+        body_color = npc_colors.get(npc.npc_type, (150, 150, 200))
+        
+        pygame.draw.circle(screen, body_color, (screen_x + TILE_SIZE // 2, screen_y + TILE_SIZE // 2 + 2), 12)
+        pygame.draw.circle(screen, (255, 220, 180), (screen_x + TILE_SIZE // 2, screen_y + 8), 7)
+        pygame.draw.circle(screen, (50, 50, 50), (screen_x + 13, screen_y + 7), 2)
+        pygame.draw.circle(screen, (50, 50, 50), (screen_x + 19, screen_y + 7), 2)
+        
+        if npc.quests:
+            exclaim_color = (255, 255, 0) if any(not q.is_accepted for q in npc.quests) else (100, 255, 100)
+            exclaim_text = FONT_NORMAL.render('!', True, exclaim_color)
+            exclaim_rect = exclaim_text.get_rect(center=(screen_x + TILE_SIZE // 2, screen_y - 5))
+            screen.blit(exclaim_text, exclaim_rect)
+        
+        npc_glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(npc_glow, (body_color[0], body_color[1], body_color[2], 30), (TILE_SIZE // 2, TILE_SIZE // 2), 18)
+        screen.blit(npc_glow, (screen_x, screen_y))
+    
+    def get_floor_theme_name(self):
+        return FLOOR_THEMES.get(self.current_floor, FLOOR_THEMES[1])['name']
 
 
 class MonsterRenderer:
