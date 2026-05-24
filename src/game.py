@@ -204,8 +204,6 @@ class Game:
                         if item:
                             self.items.append(item)
         
-        self.quest_manager.update_delivery_progress(self.floor)
-        
         self.game_map.update_fov(self.player.x, self.player.y, 15)
         self.update_camera()
     
